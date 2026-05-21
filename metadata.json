@@ -1,0 +1,6 @@
+{
+  "name": "DropForge",
+  "description": "A procedural Web Audio synthesizer and sequencer for generating dubstep drops.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
