@@ -29,6 +29,7 @@ function transposeChordName(name: string, semitones: number): string {
 
 export default function App() {
   const [isReady, setIsReady] = useState(false);
+  const [showWhatsNew, setShowWhatsNew] = useState(true);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentBar, setCurrentBar] = useState(0);
   const [hasSequence, setHasSequence] = useState(false);
@@ -79,6 +80,40 @@ export default function App() {
   const [currentKey, setCurrentKey] = useState('C');
   const [currentScaleType, setCurrentScaleType] = useState('minor');
   const [workspace, setWorkspace] = useState<'orchestrator' | 'synthlab'>('orchestrator');
+
+  // Custom 3-oscillator synth lab router and export states
+  const [usePatchInLoop, setUsePatchInLoop] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+
+  const handleTogglePatchInLoop = (val: boolean) => {
+    setUsePatchInLoop(val);
+    audioEngine.usePatchInLoop = val;
+  };
+
+  const handleToggleRecord = async () => {
+    let readyFlag = isReady;
+    if (!readyFlag) {
+      try {
+        await audioEngine.init();
+        setIsReady(true);
+        readyFlag = true;
+      } catch (e: any) {
+        setStatus('ERROR Init: ' + e.message);
+        return;
+      }
+    }
+
+    if (isRecording) {
+      audioEngine.stopRecordingAndDownload();
+      setIsRecording(false);
+    } else {
+      audioEngine.startRecording();
+      setIsRecording(true);
+      if (!isPlaying) {
+        handlePlay();
+      }
+    }
+  };
 
   const handleBakeWaveformToEng = (wave: number[]) => {
     audioEngine.customWaveform = wave;
@@ -402,11 +437,26 @@ export default function App() {
             <div className="w-4 h-4 bg-white rounded-sm -rotate-45"></div>
           </div>
           <div>
-            <h1 className="text-xl sm:text-2xl font-black tracking-tighter italic uppercase">Vortex <span className="text-white/40">//</span> Waveform</h1>
-            <p className="text-[10px] sm:text-xs font-medium uppercase tracking-widest text-cyan-400 opacity-80">Neuro-Bass Synthesizer Engine v2.4</p>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl sm:text-2xl font-black tracking-tighter italic uppercase">Vortex <span className="text-white/40">//</span> Waveform</h1>
+              <span className="text-[9px] bg-cyan-950/40 text-cyan-400 border border-cyan-500/30 px-2 py-0.5 rounded font-mono font-bold select-none h-fit">V1.2</span>
+            </div>
+            <p className="text-[10px] sm:text-xs font-medium uppercase tracking-widest text-cyan-400 opacity-80">Neuro-Bass Synthesizer Engine v1.2</p>
           </div>
         </div>
-        <div className="flex gap-6 items-center">
+        <div className="flex gap-4 sm:gap-6 items-center flex-wrap sm:flex-nowrap justify-end w-full sm:w-auto">
+          <button
+            onClick={() => setShowWhatsNew(prev => !prev)}
+            className={`px-3 py-1.5 sm:py-2 sm:px-4 rounded-xl border text-[9px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer select-none active:translate-y-0.5 ${
+              showWhatsNew 
+                ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30 shadow-[0_0_12px_rgba(6,182,212,0.2)]' 
+                : 'bg-zinc-800 text-zinc-400 border-white/5 hover:text-white hover:bg-zinc-700'
+            }`}
+            title="Toggle What's New Sidebar Changelog"
+          >
+            🛈 {showWhatsNew ? 'Hide Info' : 'What\'s New'}
+          </button>
+
           <div className="text-right">
             <p className="text-[10px] text-white/40 uppercase font-bold tracking-widest">Master Vol</p>
             <p className="text-base sm:text-lg font-mono accent-cyan">{masterVolume === 0 ? '-∞' : (20 * Math.log10(masterVolume)).toFixed(1)} dB</p>
@@ -420,7 +470,7 @@ export default function App() {
 
       <main className="flex-1 flex flex-col lg:flex-row gap-6 p-4 sm:p-6 min-h-0 overflow-y-auto lg:overflow-hidden">
         {/* Sidebar Controls */}
-        <aside className="w-full lg:w-64 flex flex-col md:grid md:grid-cols-2 lg:flex lg:flex-col gap-4 flex-shrink-0">
+        <aside className="w-full lg:w-64 flex flex-col md:grid md:grid-cols-2 lg:flex lg:flex-col gap-4 flex-shrink-0 lg:overflow-y-auto pr-1 select-none">
           <div className="glass-panel rounded-2xl p-5 flex flex-col gap-4">
             <button 
               onClick={handleInit}
@@ -604,6 +654,28 @@ export default function App() {
                 accentColor="cyan"
               />
             </div>
+          </div>
+
+          {/* Custom Synth Patch Loop Override Toggle */}
+          <div className="glass-panel rounded-2xl p-4 flex flex-col gap-2">
+            <div className="flex justify-between items-center">
+              <span className="text-[10px] font-black uppercase text-pink-300 tracking-wider">🧬 Synth Patch Loop Routing</span>
+              <span className="text-[7.5px] font-mono text-zinc-500 uppercase">3-OSC SYNTH</span>
+            </div>
+            <p className="text-[7.5px] text-zinc-400 uppercase font-mono leading-relaxed">
+              Replaces standard automatic bass progression with your Custom 3-Oscillator Patch synthesized loops.
+            </p>
+            <button
+              type="button"
+              onClick={() => handleTogglePatchInLoop(!usePatchInLoop)}
+              className={`w-full py-2.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                usePatchInLoop
+                  ? 'bg-pink-500/20 text-pink-300 border border-pink-500/40 shadow-[0_0_15px_rgba(236,72,153,0.25)]'
+                  : 'bg-zinc-800 text-zinc-400 border border-white/5 hover:bg-zinc-700 hover:text-white'
+              }`}
+            >
+              {usePatchInLoop ? '★ CUSTOM LAB PATCH ACTIVE' : 'STANDARD AUTOMATED PROGRESSION'}
+            </button>
           </div>
 
           {/* Ambient Chord Engine Panel */}
@@ -1223,6 +1295,21 @@ export default function App() {
                     >
                       <Square size={14} className={isPlaying ? 'fill-slate-100' : 'fill-transparent'} /> Stop
                     </button>
+
+                    {/* Live Capture exporting as audio files */}
+                    <button
+                      type="button"
+                      onClick={handleToggleRecord}
+                      className={`text-xs font-black uppercase flex items-center gap-2 px-3.5 py-1.5 rounded-full transition-all cursor-pointer ${
+                        isRecording 
+                          ? 'bg-red-500 text-black shadow-[0_0_15px_rgba(239,68,68,0.5)] animate-pulse' 
+                          : 'text-slate-100 hover:text-red-400 hover:bg-white/5'
+                      }`}
+                      title={isRecording ? "Finish capturing and download loop sound" : "Capture whole synthesizer loop progression directly into high quality audio file"}
+                    >
+                      <span className={`w-2.5 h-2.5 rounded-full ${isRecording ? 'bg-black' : 'bg-red-500 animate-pulse'}`} />
+                      {isRecording ? "Stop & Export Sound" : "Record Sound"}
+                    </button>
                   </div>
                   <div className="flex items-center justify-center sm:justify-end">
                     {dubstepMode ? (
@@ -1274,10 +1361,73 @@ export default function App() {
           ) : (
             <PatchLab 
               onBakeWaveformToEng={handleBakeWaveformToEng} 
-              audioCtx={audioEngine.audioCtx} 
+              audioCtx={audioEngine.audioCtx}
+              audioEngine={audioEngine}
+              usePatchInLoop={usePatchInLoop}
+              onTogglePatchInLoop={handleTogglePatchInLoop}
             />
           )}
         </section>
+
+        {/* Right Sidebar: What's New in v1.2 */}
+        {showWhatsNew && (
+          <aside className="w-full lg:w-72 bg-gradient-to-b from-black/55 to-black/35 border border-cyan-500/10 rounded-2xl p-5 flex flex-col gap-4.5 flex-shrink-0 lg:overflow-y-auto select-none shadow-[2px_10px_35px_rgba(0,0,0,0.7)]">
+            <div className="flex justify-between items-center border-b border-white/5 pb-2.5">
+              <h3 className="text-[10px] font-black uppercase tracking-widest text-cyan-300 flex items-center gap-1.5 font-mono">
+                <span>🚀 WHAT'S NEW // V1.2</span>
+              </h3>
+              <button 
+                onClick={() => setShowWhatsNew(false)}
+                className="text-[9px] font-bold font-mono text-zinc-500 hover:text-white cursor-pointer bg-transparent border-none p-0 focus:outline-none"
+              >
+                [x]
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-4 text-[10px] leading-relaxed">
+              <div className="flex flex-col gap-1.5 bg-cyan-950/15 p-3 rounded-xl border border-cyan-500/15">
+                <span className="font-extrabold uppercase text-cyan-400 tracking-wider flex items-center gap-1 font-mono">
+                  🎹 MOBILE MIDI KEYBOARD
+                </span>
+                <p className="text-zinc-400 text-[8.5px] uppercase font-mono leading-normal">
+                  Immediate zero-lag touch response using pointer event triggers (`onPointerDown`). Play fluidly on your phone with custom active key glows.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-1.5 bg-purple-950/15 p-3 rounded-xl border border-purple-500/15">
+                <span className="font-extrabold uppercase text-purple-400 tracking-wider flex items-center gap-1 font-mono">
+                  🌐 REMOTE VITAL IMPORT
+                </span>
+                <p className="text-zinc-400 text-[8.5px] uppercase font-mono leading-normal">
+                  Fetch and load custom .vital patches in real-time. Instantly parses sub-parameters and sets synthesizers.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-1.5 bg-pink-950/15 p-3 rounded-xl border border-pink-500/15">
+                <span className="font-extrabold uppercase text-pink-400 tracking-wider flex items-center gap-1 font-mono">
+                  🔮 CURATED STACYCHLOE PATCH
+                </span>
+                <p className="text-zinc-400 text-[8.5px] uppercase font-mono leading-normal">
+                  Access direct preset link stream. Quick button loads "Absolute Lead" digital saw & formant waves instantly.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-1.5 bg-amber-950/15 p-3 rounded-xl border border-amber-500/15">
+                <span className="font-extrabold uppercase text-amber-400 tracking-wider flex items-center gap-1 font-mono">
+                  💎 STEREO UNISON SPREAD
+                </span>
+                <p className="text-zinc-400 text-[8.5px] uppercase font-mono leading-normal">
+                  Dial in ultra-wide vital style detunes that expand multi-voice digital oscillators into warm soundscapes.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-auto border-t border-white/5 pt-3.5 text-center flex flex-col gap-1">
+              <span className="text-[7.5px] font-mono uppercase text-zinc-500">SYSTEM ARCHITECTURE</span>
+              <span className="text-[8px] font-black font-mono text-cyan-400 uppercase tracking-widest">V1.2 // COLD PERSIST CORES</span>
+            </div>
+          </aside>
+        )}
       </main>
 
       <footer className="px-8 py-4 bg-black/40 border-t border-white/5 flex flex-col md:flex-row justify-between items-center gap-2 text-[8px] sm:text-[10px] font-bold tracking-widest text-white/20 flex-shrink-0">

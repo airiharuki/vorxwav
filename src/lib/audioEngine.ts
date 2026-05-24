@@ -132,6 +132,34 @@ export class DubstepEngine {
   public currentScaleType = 'minor'; // Selected musical scale type (minor, major, phrygian, dorian, lharmonic)
   public customWaveform: number[] | null = null; // Custom sketched waveform from laboratory
 
+  // Routing custom multi-voice 3-osc patches directly into loop triggers
+  public usePatchInLoop = false;
+  public labPatch = {
+    osc_1_voices: 4,
+    osc_1_detune: 0.16,
+    osc_1_volume: 0.75,
+    osc_2_voices: 8,
+    osc_2_detune: 0.25,
+    osc_2_volume: 0.45,
+    osc_3_voices: 6,
+    osc_3_detune: 0.20,
+    osc_3_volume: 0.60,
+    sub_volume: 0.85,
+    filter_cutoff: 0.45,
+    filter_resonance: 0.35,
+    lfo_1_rate: 3.5,
+    lfo_1_amount: 0.65
+  };
+
+  public osc1Waveform: number[] = [];
+  public osc2Waveform: number[] = [];
+  public osc3Waveform: number[] = [];
+
+  // Media Recording & Export of Loops
+  private mediaRecorder: MediaRecorder | null = null;
+  private recordedChunks: Blob[] = [];
+  public isRecording = false;
+
   // Custom Chord Drift & Mutation controls
   public chordDriftEnabled = false;
   public chordDriftAmount = 0.35; // 0.0 to 1.0 (detuning depth)
@@ -180,13 +208,27 @@ export class DubstepEngine {
   private onTickCallback: (currentBar: number) => void = () => {};
 
   constructor() {
+    // Set up default single-cycle waveforms for the 3 custom lab oscillators
+    const wave1: number[] = [];
+    const wave2: number[] = [];
+    const wave3: number[] = [];
+    for (let i = 0; i < 128; i++) {
+      const a = (i / 128) * Math.PI * 2;
+      wave1.push(Math.sin(a) * 0.75 + Math.sin(a * 3) * 0.15);
+      wave2.push(Math.sin(a) * 0.5 + Math.sin(a * 2) * 0.4 - Math.sin(a * 4) * 0.2);
+      wave3.push(Math.sin(a) * 0.45 + Math.sin(a * 5) * 0.3);
+    }
+    this.osc1Waveform = wave1;
+    this.osc2Waveform = wave2;
+    this.osc3Waveform = wave3;
+
     // Set up a default ambient chord progression
     const selectedPreset = CHORD_PRESETS[0];
     this.chordProgressionPathName = selectedPreset.name;
     this.chordProgression = [];
     for (let i = 0; i < 16; i++) {
-      const chordIdx = Math.floor(i / 2) % 8;
-      this.chordProgression.push(selectedPreset.chords[chordIdx]);
+       const chordIdx = Math.floor(i / 2) % 8;
+       this.chordProgression.push(selectedPreset.chords[chordIdx]);
     }
   }
 
@@ -452,6 +494,10 @@ export class DubstepEngine {
 
   private playBass(t: number, dur: number, p: BassParams) {
     if (!this.audioCtx || !this.masterGain) return;
+    if (this.usePatchInLoop) {
+      this.playCustomPatchSynth(t, dur, p);
+      return;
+    }
     const transFactor = Math.pow(2, this.keyTranspose / 12);
 
     // Calculate base frequencies: if scaleLock is enabled, align to the active chords root; else use generated values
@@ -619,6 +665,183 @@ export class DubstepEngine {
     if (mid2L) { mid2L.start(t); mid2L.stop(end); }
     if (mid2R) { mid2R.start(t); mid2R.stop(end); }
     lfo.start(t); lfo.stop(end);
+  }
+
+  private playCustomPatchSynth(t: number, dur: number, p: BassParams) {
+    if (!this.audioCtx || !this.masterGain) return;
+    const transFactor = Math.pow(2, this.keyTranspose / 12);
+
+    let baseFreq = p.sf * transFactor;
+
+    if (this.scaleLocked && this.chordProgression && this.chordProgression[this.currentBar]) {
+      const activeChord = this.chordProgression[this.currentBar];
+      if (activeChord.notes && activeChord.notes.length > 0) {
+        let activeChordMidi = activeChord.notes[0];
+        let subMidi = activeChordMidi;
+        while (subMidi > 43) { subMidi -= 12; }
+        while (subMidi < 28) { subMidi += 12; }
+        baseFreq = 440 * Math.pow(2, (subMidi - 69) / 12);
+      }
+    }
+
+    const now = t;
+    const oscNode1 = this.audioCtx.createOscillator();
+    const oscNode2 = this.audioCtx.createOscillator();
+    const oscNode3 = this.audioCtx.createOscillator();
+    const subNode = this.audioCtx.createOscillator();
+    const filterNode = this.audioCtx.createBiquadFilter();
+
+    try {
+      if (this.osc1Waveform && this.osc1Waveform.length > 0) {
+        const real = new Float32Array(this.osc1Waveform.length + 1);
+        const imag = new Float32Array(this.osc1Waveform.length + 1);
+        for (let i = 0; i < this.osc1Waveform.length; i++) real[i + 1] = this.osc1Waveform[i];
+        const pWave = this.audioCtx.createPeriodicWave(real, imag);
+        oscNode1.setPeriodicWave(pWave);
+      } else {
+        oscNode1.type = 'sawtooth';
+      }
+
+      if (this.osc2Waveform && this.osc2Waveform.length > 0) {
+        const real = new Float32Array(this.osc2Waveform.length + 1);
+        const imag = new Float32Array(this.osc2Waveform.length + 1);
+        for (let i = 0; i < this.osc2Waveform.length; i++) real[i + 1] = this.osc2Waveform[i];
+        const pWave = this.audioCtx.createPeriodicWave(real, imag);
+        oscNode2.setPeriodicWave(pWave);
+      } else {
+        oscNode2.type = 'square';
+      }
+
+      if (this.osc3Waveform && this.osc3Waveform.length > 0) {
+        const real = new Float32Array(this.osc3Waveform.length + 1);
+        const imag = new Float32Array(this.osc3Waveform.length + 1);
+        for (let i = 0; i < this.osc3Waveform.length; i++) real[i + 1] = this.osc3Waveform[i];
+        const pWave = this.audioCtx.createPeriodicWave(real, imag);
+        oscNode3.setPeriodicWave(pWave);
+      } else {
+        oscNode3.type = 'sawtooth';
+      }
+    } catch (err) {
+      oscNode1.type = 'sawtooth';
+      oscNode2.type = 'square';
+      oscNode3.type = 'sawtooth';
+    }
+
+    subNode.type = 'sine';
+
+    const midFreq = baseFreq * 2;
+    oscNode1.frequency.setValueAtTime(midFreq, now);
+    oscNode2.frequency.setValueAtTime(midFreq * (1 + (this.labPatch.osc_2_detune * 0.05)), now);
+    oscNode3.frequency.setValueAtTime(midFreq * (1 - (this.labPatch.osc_3_detune * 0.05)), now);
+    subNode.frequency.setValueAtTime(baseFreq, now);
+
+    filterNode.type = 'lowpass';
+    const cutoffHz = 80 + this.labPatch.filter_cutoff * 3000;
+    filterNode.frequency.setValueAtTime(cutoffHz, now);
+    filterNode.Q.setValueAtTime(1 + this.labPatch.filter_resonance * 15, now);
+
+    const lfoNode = this.audioCtx.createOscillator();
+    const lfoGainNode = this.audioCtx.createGain();
+    const finalLr = Math.max(0.1, this.labPatch.lfo_1_rate * (this.wobbleRatio * 1.5));
+    lfoNode.frequency.setValueAtTime(finalLr, now);
+    lfoGainNode.gain.setValueAtTime(this.labPatch.lfo_1_amount * (cutoffHz * 0.85), now);
+
+    lfoNode.connect(lfoGainNode);
+    lfoGainNode.connect(filterNode.frequency);
+
+    const gain1 = this.audioCtx.createGain();
+    const gain2 = this.audioCtx.createGain();
+    const gain3 = this.audioCtx.createGain();
+    const gainSub = this.audioCtx.createGain();
+    const mainGainNode = this.audioCtx.createGain();
+
+    gain1.gain.setValueAtTime(this.labPatch.osc_1_volume * 0.3 * p.vol, now);
+    gain2.gain.setValueAtTime(this.labPatch.osc_2_volume * 0.22 * p.vol, now);
+    gain3.gain.setValueAtTime(this.labPatch.osc_3_volume * 0.22 * p.vol, now);
+    gainSub.gain.setValueAtTime(this.labPatch.sub_volume * 0.45 * p.vol, now);
+
+    oscNode1.connect(gain1).connect(filterNode);
+    oscNode2.connect(gain2).connect(filterNode);
+    oscNode3.connect(gain3).connect(filterNode);
+    subNode.connect(gainSub).connect(filterNode);
+
+    const distFactor = this.bitcrushRatio * 2.5;
+    const distAmount = p.dist * 100 * distFactor;
+    if (distAmount > 10) {
+      const w = this.audioCtx.createWaveShaper();
+      const n = 44100;
+      const c = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        const x = i * 2 / n - 1;
+        c[i] = ((3 + distAmount) * x * 20 * (Math.PI / 180)) / (Math.PI + distAmount * Math.abs(x));
+      }
+      w.curve = c;
+      w.oversample = '4x';
+      filterNode.connect(w).connect(mainGainNode);
+    } else {
+      filterNode.connect(mainGainNode);
+    }
+
+    mainGainNode.connect(this.masterGain);
+
+    mainGainNode.gain.setValueAtTime(0, now);
+    mainGainNode.gain.linearRampToValueAtTime(0.7, now + 0.05);
+    mainGainNode.gain.setValueAtTime(0.7, now + dur - 0.05);
+    mainGainNode.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+    const playEnd = now + dur + 0.1;
+    lfoNode.start(now); lfoNode.stop(playEnd);
+    oscNode1.start(now); oscNode1.stop(playEnd);
+    oscNode2.start(now); oscNode2.stop(playEnd);
+    oscNode3.start(now); oscNode3.stop(playEnd);
+    subNode.start(now); subNode.stop(playEnd);
+  }
+
+  // Live recording options
+  public startRecording() {
+    if (!this.audioCtx || !this.masterGain) {
+      console.warn("Synthesis engine must be initialized to record!");
+      return;
+    }
+    try {
+      this.recordedChunks = [];
+      const dest = this.audioCtx.createMediaStreamDestination();
+      this.masterGain.connect(dest);
+
+      // WebM audio with Opus codec is natively supported by modern browsers
+      this.mediaRecorder = new MediaRecorder(dest.stream, {
+        mimeType: 'audio/webm;codecs=opus'
+      });
+
+      this.mediaRecorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          this.recordedChunks.push(e.data);
+        }
+      };
+
+      this.mediaRecorder.start();
+      this.isRecording = true;
+      console.log("Recording started successfully...");
+    } catch (err) {
+      console.error("Failed to start MediaRecorder recording stream:", err);
+    }
+  }
+
+  public stopRecordingAndDownload() {
+    if (!this.mediaRecorder || !this.isRecording) return;
+    this.mediaRecorder.onstop = () => {
+      const blob = new Blob(this.recordedChunks, { type: 'audio/webm' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `vortex_synth_loop_${Date.now()}.webm`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    };
+    this.mediaRecorder.stop();
+    this.isRecording = false;
   }
 
   private playRhodesVoice(t: number, freq: number, dur: number, vol: number, fromFreq?: number) {

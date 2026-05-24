@@ -2,6 +2,19 @@
 
 > **Warning:** Prolonged exposure to these spatial ambient waves may cause sudden urges to stare out of rainy windows, write sci-fi screenplays, or believe you are a rogue replicant on the outer rings of Saturn. Listener discretion (and a warm cup of matcha) is advised.
 
+---
+
+## ⚡ What's New in v1.2
+
+Welcome to the **v1.2 Release** (Code Name: *Cosmic Cores*)! This minor update is focused on making our interactive synthesizer highly responsive on mobile devices and unlocking cloud-preset sharing:
+
+1.  🎹 **Zero-Delay Mobile MIDI Piano**: Remapped all interactive audition keyboard keys from standard delayed clicks to high-speed, hardware-like pointer touch listeners (`onPointerDown`). Play fluid, multi-finger solos on your phone with instant cyber-glow key activations.
+2.  🌐 **Remote .vital Preset Loaders**: Import and decode full synthesizers from remote URLs directly inside your browser. No local uploads required.
+3.  🔮 **Curated Stacychloe absolute Lead Patch**: Embedded Stacychloe's absolute lead formula directly. Load the legendary, resonant formant filter growl with a single tap.
+4.  💎 **Stereophonic Unison widener**: Fine-tuned the custom fourier periodic-wave width expansion for immense stereo presence.
+
+---
+
 Welcome to **Nebula Drift**, your personal pocket-sized space observatory and modular sound laboratory. This application is a fully-fledged full-stack interactive synthesizer engineered to generate generative, microtonal drift-scapes, nostalgic FM-chimes, and analog tape warbles.
 
 It transforms cold, rigid digital audio into warm, living, breathing sonic lifeforms that glide and evolve entirely on their own!
