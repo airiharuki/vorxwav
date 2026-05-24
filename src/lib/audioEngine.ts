@@ -125,6 +125,11 @@ export class DubstepEngine {
   public scaleLocked = false;
   public keyTranspose = 0; // Transposable key shift in semitones (-12 to +12)
   public dubstepMode = false; // Savage half-time wobble drop engine!
+  
+  // Dynamic scale locking and wide unison parameters
+  public unisonWidth = 0.6; // Stereo width spread (0 to 1) for Vital wide unison
+  public currentKey = 'C'; // Selected musical root key
+  public currentScaleType = 'minor'; // Selected musical scale type (minor, major, phrygian, dorian, lharmonic)
 
   // Custom Chord Drift & Mutation controls
   public chordDriftEnabled = false;
@@ -448,23 +453,59 @@ export class DubstepEngine {
     if (!this.audioCtx || !this.masterGain) return;
     const transFactor = Math.pow(2, this.keyTranspose / 12);
 
+    // Calculate base frequencies: if scaleLock is enabled, align to the active chords root; else use generated values
+    let subFreq = p.sf * transFactor;
+    let midFreq = p.mf * transFactor;
+
+    if (this.scaleLocked && this.chordProgression && this.chordProgression[this.currentBar]) {
+      const activeChord = this.chordProgression[this.currentBar];
+      if (activeChord.notes && activeChord.notes.length > 0) {
+        let activeChordMidi = activeChord.notes[0];
+        let subMidi = activeChordMidi;
+        
+        // Lock to deep fundamental sub-bass range (MIDI 28-43, i.e. ~37Hz - 98Hz)
+        while (subMidi > 43) {
+          subMidi -= 12;
+        }
+        while (subMidi < 28) {
+          subMidi += 12;
+        }
+        
+        subFreq = 440 * Math.pow(2, (subMidi - 69) / 12);
+        midFreq = 440 * Math.pow(2, ((subMidi + 12) - 69) / 12);
+      }
+    }
+
     const sub = this.audioCtx.createOscillator();
     sub.type = 'sine'; 
-    sub.frequency.value = p.sf * transFactor; 
+    sub.frequency.value = subFreq; 
     sub.detune.value = p.dt;
 
-    const mid = this.audioCtx.createOscillator();
-    mid.type = p.style === 'reese' ? 'sawtooth' : (p.style === 'growl' ? 'square' : 'sawtooth'); 
-    mid.frequency.value = p.mf * transFactor; 
-    mid.detune.value = p.dt * 1.5;
+    // Standard modern synth unison uses multiple oscillators detuned and spread wide across the stereo field
+    const midType = p.style === 'reese' ? 'sawtooth' : (p.style === 'growl' ? 'square' : 'sawtooth');
+
+    const midL = this.audioCtx.createOscillator();
+    midL.type = midType; 
+    midL.frequency.value = midFreq; 
+    midL.detune.value = (p.dt * 1.2) - (25 * this.unisonWidth);
+
+    const midR = this.audioCtx.createOscillator();
+    midR.type = midType; 
+    midR.frequency.value = midFreq; 
+    midR.detune.value = (p.dt * 1.2) + (25 * this.unisonWidth);
     
-    let mid2: OscillatorNode | null = null;
+    let mid2L: OscillatorNode | null = null;
+    let mid2R: OscillatorNode | null = null;
     if (p.style === 'reese') {
-      mid2 = this.audioCtx.createOscillator();
-      mid2.type = 'sawtooth';
-      mid2.frequency.value = p.mf * transFactor;
-      // Ensure mid2.detune is set to a negative value relative to mid.detune to create a phasing effect
-      mid2.detune.value = mid.detune.value - 24; 
+      mid2L = this.audioCtx.createOscillator();
+      mid2L.type = 'sawtooth';
+      mid2L.frequency.value = midFreq;
+      mid2L.detune.value = midL.detune.value - 12 - (15 * this.unisonWidth);
+
+      mid2R = this.audioCtx.createOscillator();
+      mid2R.type = 'sawtooth';
+      mid2R.frequency.value = midFreq;
+      mid2R.detune.value = midR.detune.value - 12 + (15 * this.unisonWidth);
     }
 
     const f = this.audioCtx.createBiquadFilter();
@@ -474,6 +515,35 @@ export class DubstepEngine {
     // Resonance/Reverb Ratio: adjusts filter resonance for wet squelchy sweep
     const finalFq = (p.style === 'growl' ? p.fq * 2 : p.fq) * (this.resonanceRatio * 3.0);
     f.Q.value = finalFq;
+
+    // Stereo Panning for the mid-bass oscillators to create the "Vital" type Wide Unison effect
+    let panL: StereoPannerNode | null = null;
+    let panR: StereoPannerNode | null = null;
+    if (this.audioCtx.createStereoPanner) {
+      panL = this.audioCtx.createStereoPanner();
+      panL.pan.setValueAtTime(-Math.max(0.01, this.unisonWidth), t);
+      panR = this.audioCtx.createStereoPanner();
+      panR.pan.setValueAtTime(Math.max(0.01, this.unisonWidth), t);
+    }
+
+    if (panL && panR) {
+      midL.connect(panL);
+      panL.connect(f);
+      midR.connect(panR);
+      panR.connect(f);
+
+      if (mid2L) {
+        mid2L.connect(panL);
+      }
+      if (mid2R) {
+        mid2R.connect(panR);
+      }
+    } else {
+      midL.connect(f);
+      midR.connect(f);
+      if (mid2L) mid2L.connect(f);
+      if (mid2R) mid2R.connect(f);
+    }
 
     const lfo = this.audioCtx.createOscillator();
     const lg = this.audioCtx.createGain();
@@ -518,8 +588,6 @@ export class DubstepEngine {
     g.gain.linearRampToValueAtTime(finalVol, t + 0.02); 
     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
     
-    mid.connect(f); 
-    if (mid2) { mid2.connect(f); }
     f.connect(w); 
     w.connect(g); 
     sub.connect(g); 
@@ -527,8 +595,10 @@ export class DubstepEngine {
     
     const end = t + dur + 0.15; 
     sub.start(t); sub.stop(end); 
-    mid.start(t); mid.stop(end); 
-    if (mid2) { mid2.start(t); mid2.stop(end); }
+    midL.start(t); midL.stop(end); 
+    midR.start(t); midR.stop(end); 
+    if (mid2L) { mid2L.start(t); mid2L.stop(end); }
+    if (mid2R) { mid2R.start(t); mid2R.stop(end); }
     lfo.start(t); lfo.stop(end);
   }
 
@@ -1137,19 +1207,90 @@ export class DubstepEngine {
     }
 
     // Generate Chord progression
-    let selectedPreset = CHORD_PRESETS[Math.floor(Math.random() * CHORD_PRESETS.length)];
     if (this.scaleLocked) {
-      const found = CHORD_PRESETS.find(p => p.name === this.chordProgressionPathName);
-      if (found) {
-        selectedPreset = found;
+      this.generateProgressionFromScale();
+    } else {
+      let selectedPreset = CHORD_PRESETS[Math.floor(Math.random() * CHORD_PRESETS.length)];
+      this.chordProgressionPathName = selectedPreset.name;
+      this.chordProgression = [];
+      for (let i = 0; i < 16; i++) {
+        const chordIdx = Math.floor(i / 2) % 8;
+        this.chordProgression.push(selectedPreset.chords[chordIdx]);
       }
     }
-    this.chordProgressionPathName = selectedPreset.name;
-    this.chordProgression = [];
-    for (let i = 0; i < 16; i++) {
-      const chordIdx = Math.floor(i / 2) % 8;
-      this.chordProgression.push(selectedPreset.chords[chordIdx]);
+  }
+
+  public generateProgressionFromScale() {
+    const keyOffsetMap: Record<string, number> = {
+      'C': 48, 'C#': 49, 'D': 50, 'D#': 51, 'Eb': 51, 'E': 40, 'F': 41, 'F#': 42, 'G': 43, 'G#': 44, 'Ab': 44, 'A': 45, 'A#': 46, 'Bb': 46, 'B': 47
+    };
+    const scales: Record<string, { intervals: number[], degrees: number[], names: string[] }> = {
+      minor: {
+        intervals: [0, 2, 3, 5, 7, 8, 10],
+        degrees: [0, 5, 2, 6, 3, 4, 5, 4],
+        names: ['i', 'VI', 'III', 'VII', 'iv', 'v', 'VI', 'v']
+      },
+      major: {
+        intervals: [0, 2, 4, 5, 7, 9, 11],
+        degrees: [0, 3, 4, 1, 5, 3, 4, 0],
+        names: ['I', 'IV', 'V', 'ii', 'vi', 'IV', 'V', 'I']
+      },
+      phrygian: {
+        intervals: [0, 1, 3, 5, 7, 8, 10],
+        degrees: [0, 1, 3, 6, 0, 1, 4, 1],
+        names: ['i', 'bII', 'iv', 'bVII', 'i', 'bII', 'v', 'bII']
+      },
+      dorian: {
+        intervals: [0, 2, 3, 5, 7, 9, 10],
+        degrees: [0, 3, 6, 4, 0, 3, 1, 3],
+        names: ['i', 'IV', 'bVII', 'v', 'i', 'IV', 'ii', 'IV']
+      },
+      lharmonic: {
+        intervals: [0, 2, 3, 5, 7, 8, 11],
+        degrees: [0, 3, 4, 0, 5, 1, 4, 0],
+        names: ['i', 'iv', 'V', 'i', 'VI', 'bII', 'V', 'i']
+      }
+    };
+
+    const rootMidi = keyOffsetMap[this.currentKey] || 48;
+    const s = scales[this.currentScaleType] || scales.minor;
+    
+    const scaleNameFull = this.currentScaleType === 'lharmonic' 
+      ? 'Harmonic Minor' 
+      : this.currentScaleType.charAt(0).toUpperCase() + this.currentScaleType.slice(1);
+    this.chordProgressionPathName = `${this.currentKey} ${scaleNameFull}`;
+    
+    const computedProgression: Chord[] = [];
+
+    for (let c = 0; c < 8; c++) {
+      const d = s.degrees[c];
+      const chordsNotes: number[] = [];
+      
+      const voiceSteps = [0, 2, 4, 6, 8, 10];
+      voiceSteps.forEach(step => {
+        const stepIndex = d + step;
+        const scaleIndex = stepIndex % 7;
+        const octaveShift = Math.floor(stepIndex / 7);
+        const note = rootMidi + s.intervals[scaleIndex] + (octaveShift * 12);
+        
+        if (note >= 36 && note <= 92) {
+          chordsNotes.push(note);
+        }
+      });
+
+      const rootName = s.names[c];
+      computedProgression.push({
+        name: `${this.currentKey} ${rootName}`,
+        notes: chordsNotes
+      });
     }
+
+    // Duplicate chords to stretch over 16 bars (like standard)
+    const stretched: Chord[] = [];
+    for (let i = 0; i < 16; i++) {
+      stretched.push(computedProgression[Math.floor(i / 2) % 8]);
+    }
+    this.chordProgression = stretched;
   }
 
   public changeScalePreset(presetName: string) {

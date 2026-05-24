@@ -74,7 +74,10 @@ export default function App() {
   const [chordGlideEnabled, setChordGlideEnabled] = useState(true);
   const [chordGlideTime, setChordGlideTime] = useState(0.35);
   const [dubstepMode, setDubstepMode] = useState(false);
-
+  const [unisonWidth, setUnisonWidth] = useState(0.6);
+  const [currentKey, setCurrentKey] = useState('C');
+  const [currentScaleType, setCurrentScaleType] = useState('minor');
+ 
   useEffect(() => {
     audioEngine.onTick((bar) => {
       setCurrentBar(bar);
@@ -101,6 +104,9 @@ export default function App() {
     setChordGlideEnabled(audioEngine.chordGlideEnabled);
     setChordGlideTime((audioEngine.chordGlideTime - 0.05) / 1.15); // scaled 0.05 - 1.2s range to percentage
     setDubstepMode(audioEngine.dubstepMode);
+    setUnisonWidth(audioEngine.unisonWidth);
+    setCurrentKey(audioEngine.currentKey);
+    setCurrentScaleType(audioEngine.currentScaleType);
   }, []);
 
   const handleInit = async () => {
@@ -276,9 +282,39 @@ export default function App() {
   const handleScaleLockedChange = (val: boolean) => {
     setScaleLocked(val);
     audioEngine.scaleLocked = val;
+    if (val) {
+      audioEngine.generateProgressionFromScale();
+      setChordProgressionName(audioEngine.chordProgressionPathName);
+    }
+  };
+
+  const handleCurrentKeyChange = (key: string) => {
+    setCurrentKey(key);
+    audioEngine.currentKey = key;
+    if (scaleLocked) {
+      audioEngine.generateProgressionFromScale();
+      setChordProgressionName(audioEngine.chordProgressionPathName);
+    }
+  };
+
+  const handleCurrentScaleTypeChange = (type: string) => {
+    setCurrentScaleType(type);
+    audioEngine.currentScaleType = type;
+    if (scaleLocked) {
+      audioEngine.generateProgressionFromScale();
+      setChordProgressionName(audioEngine.chordProgressionPathName);
+    }
+  };
+
+  const handleUnisonWidthChange = (val: number) => {
+    setUnisonWidth(val);
+    audioEngine.unisonWidth = val;
   };
 
   const handleScalePresetChange = (name: string) => {
+    // If presets are clicked, unlock scale lock to allow the user to explore preset progressions freely
+    setScaleLocked(false);
+    audioEngine.scaleLocked = false;
     audioEngine.changeScalePreset(name);
     setChordProgressionName(audioEngine.chordProgressionPathName);
   };
@@ -572,67 +608,104 @@ export default function App() {
             </div>
 
             {/* Scale selection & Locking options - requested by user */}
-            <div className="flex flex-col gap-2 p-2.5 bg-black/35 rounded-xl border border-white/[0.04] shadow-inner">
-              <div className="flex justify-between items-center text-[9px] font-bold uppercase text-slate-100">
-                <span>Select Scale Preset</span>
-                <span className={scaleLocked ? "text-pink-400 font-mono text-[10px]" : "text-white/45 font-mono text-[10px]"}>
-                  {scaleLocked ? "Locked 🔒" : "Unlocked 🔓"}
-                </span>
-              </div>
-
-              {/* Grid of presets */}
-              <div className="grid grid-cols-3 gap-1 bg-black/20 rounded-lg p-1">
+            <div className="flex flex-col gap-3.5 p-3.5 bg-black/45 rounded-xl border border-white/[0.04] shadow-inner">
+              
+              {/* Scale Lock Header */}
+              <div className="flex justify-between items-center text-[9px] font-black uppercase text-slate-100 tracking-wider">
+                <span>Scale Lock Engine</span>
                 <button
                   type="button"
-                  onClick={() => handleScalePresetChange('Nebula Drift')}
-                  className={`py-1.5 rounded text-[8px] font-bold uppercase transition-all truncate px-1 ${
-                    chordProgressionName === 'Nebula Drift'
-                      ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shadow-[0_0_6px_rgba(6,182,212,0.15)]'
-                      : 'text-white/45 hover:text-white/70 border border-transparent'
+                  onClick={() => handleScaleLockedChange(!scaleLocked)}
+                  className={`px-2.5 py-1 rounded text-[8px] font-bold uppercase transition-all flex items-center gap-1.5 ${
+                    scaleLocked
+                      ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.2)]'
+                      : 'bg-zinc-800 text-zinc-400 border border-transparent'
                   }`}
-                  title="Switch to Nebula Drift Scale"
                 >
-                  Nebula Drift
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleScalePresetChange('Cyberpunk Sadness')}
-                  className={`py-1.5 rounded text-[8px] font-bold uppercase transition-all truncate px-1 ${
-                    chordProgressionName === 'Cyberpunk Sadness'
-                      ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shadow-[0_0_6px_rgba(6,182,212,0.15)]'
-                      : 'text-white/45 hover:text-white/70 border border-transparent'
-                  }`}
-                  title="Switch to Cyberpunk Sadness Scale"
-                >
-                  Cyberpunk
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleScalePresetChange('Synthwave Skyline')}
-                  className={`py-1.5 rounded text-[8px] font-bold uppercase transition-all truncate px-1 ${
-                    chordProgressionName === 'Synthwave Skyline'
-                      ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shadow-[0_0_6px_rgba(6,182,212,0.15)]'
-                      : 'text-white/45 hover:text-white/70 border border-transparent'
-                  }`}
-                  title="Switch to Synthwave Skyline Scale"
-                >
-                  Synthwave
+                  <span>{scaleLocked ? "🔒 LOCKED" : "🔓 UNLOCKED"}</span>
                 </button>
               </div>
 
-              {/* Lock Scale Option Button */}
-              <button
-                type="button"
-                onClick={() => handleScaleLockedChange(!scaleLocked)}
-                className={`w-full py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-wider border transition-all flex items-center justify-center gap-1.5 ${
-                  scaleLocked
-                    ? 'bg-pink-500/10 text-pink-400 border-pink-500/20 shadow-[0_0_10px_rgba(236,72,153,0.2)]'
-                    : 'bg-white/5 text-white/45 border-white/5 hover:bg-white/10 hover:text-white'
-                }`}
-              >
-                <span>{scaleLocked ? "Scale is Locked" : "Scale is Unlocked"}</span>
-                <span className="text-[10px]">{scaleLocked ? "🔒" : "🔓"}</span>
-              </button>
+              {/* Piano Roll Key Select Grid */}
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Root Key</span>
+                <div className="grid grid-cols-6 gap-1 p-1 bg-black/30 rounded-lg border border-white/5">
+                  {['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'].map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => handleCurrentKeyChange(k)}
+                      className={`text-[9px] font-mono py-1 rounded-md transition-all font-bold ${
+                        currentKey === k
+                          ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/35 shadow-[0_0_6px_rgba(6,182,212,0.15)] scale-[1.03]'
+                          : k.includes('#') || k === 'Eb' || k === 'Ab' || k === 'Bb'
+                          ? 'bg-black/40 text-white/35 hover:text-white/70'
+                          : 'bg-white/5 text-white/60 hover:text-white'
+                      }`}
+                    >
+                      {k}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Scale type selectors */}
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Scale Mode</span>
+                <div className="grid grid-cols-2 gap-1 p-1 bg-black/30 rounded-lg border border-white/5">
+                  {[
+                    { id: 'minor', label: 'Nat Minor' },
+                    { id: 'major', label: 'Major' },
+                    { id: 'phrygian', label: 'Phrygian' },
+                    { id: 'dorian', label: 'Dorian' },
+                    { id: 'lharmonic', label: 'Harmonic Min' },
+                  ].map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => handleCurrentScaleTypeChange(s.id)}
+                      className={`text-[8px] uppercase tracking-wider py-1 px-1 rounded transition-all font-bold truncate ${
+                        currentScaleType === s.id && scaleLocked
+                          ? 'bg-pink-500/20 text-pink-300 border border-pink-500/35 shadow-[0_0_6px_rgba(236,72,153,0.15)]'
+                          : 'bg-white/5 text-white/45 hover:text-white/85'
+                      }`}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => handleScalePresetChange('Nebula Drift')}
+                    className="text-[8px] uppercase tracking-wider py-1 px-1 rounded transition-all font-bold bg-white/[0.02] border border-dashed border-white/10 text-white/45 hover:text-white/80 hover:bg-white/5 truncate"
+                    title="Unlock and reset to Nebula Drift original chord preset list"
+                  >
+                    Preset Mode 🎚️
+                  </button>
+                </div>
+              </div>
+
+              {/* VITAL STEREO WIDE UNISON ADJUSTMENT - "a vital type adjustment wide" */}
+              <div className="flex flex-col gap-2 pt-2 border-t border-white/5">
+                <div className="flex justify-between items-center text-[9px] font-bold uppercase text-slate-300">
+                  <span className="flex items-center gap-1 text-amber-400">
+                    <span className="animate-pulse">💎</span> Vital Wide Unison
+                  </span>
+                  <span className="text-amber-400 font-mono text-[10px]">{Math.round(unisonWidth * 100)}%</span>
+                </div>
+                <div className="flex items-center gap-3.5 bg-black/20 p-2 rounded-lg border border-white/[0.03]">
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={unisonWidth}
+                    onChange={(e) => handleUnisonWidthChange(parseFloat(e.target.value))}
+                    className="flex-1 h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-amber-400 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-[0_0_8px_rgba(251,191,36,0.8)] outline-none"
+                    title="Controls the stereo spread and voice detuning of synth oscillators for that signature ultra-wide Vital synthesizer sound!"
+                  />
+                  <span className="text-[7.5px] uppercase font-black tracking-widest font-mono text-white/40">Width</span>
+                </div>
+              </div>
             </div>
 
             {/* Selection buttons for Chord Styles */}
