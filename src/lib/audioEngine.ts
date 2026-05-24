@@ -124,6 +124,7 @@ export class DubstepEngine {
   public ambientSubActive = false;
   public scaleLocked = false;
   public keyTranspose = 0; // Transposable key shift in semitones (-12 to +12)
+  public dubstepMode = false; // Savage half-time wobble drop engine!
 
   // Custom Chord Drift & Mutation controls
   public chordDriftEnabled = false;
@@ -275,43 +276,67 @@ export class DubstepEngine {
     if (type === 'kick') {
       const o = this.audioCtx.createOscillator();
       const g = this.audioCtx.createGain();
-      o.frequency.setValueAtTime(150, t); 
-      o.frequency.exponentialRampToValueAtTime(35, t + 0.15);
-      g.gain.setValueAtTime(1, t); 
-      g.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+      if (this.dubstepMode) {
+        o.type = 'triangle';
+        o.frequency.setValueAtTime(200, t); 
+        o.frequency.exponentialRampToValueAtTime(32, t + 0.18);
+        g.gain.setValueAtTime(1.4, t); 
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+      } else {
+        o.frequency.setValueAtTime(150, t); 
+        o.frequency.exponentialRampToValueAtTime(35, t + 0.15);
+        g.gain.setValueAtTime(1, t); 
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+      }
       o.connect(g); 
       g.connect(dest); 
       o.start(t); 
-      o.stop(t + 0.4);
+      o.stop(t + 0.5);
     } else if (type === 'snare') {
       const o = this.audioCtx.createOscillator();
       const g1 = this.audioCtx.createGain();
-      o.type = 'triangle'; 
-      o.frequency.setValueAtTime(220, t); 
-      o.frequency.exponentialRampToValueAtTime(110, t + 0.06);
-      g1.gain.setValueAtTime(0.5, t); 
-      g1.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+      if (this.dubstepMode) {
+        o.type = 'sawtooth';
+        o.frequency.setValueAtTime(260, t); 
+        o.frequency.exponentialRampToValueAtTime(110, t + 0.08);
+        g1.gain.setValueAtTime(0.7, t); 
+        g1.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+      } else {
+        o.type = 'triangle'; 
+        o.frequency.setValueAtTime(220, t); 
+        o.frequency.exponentialRampToValueAtTime(110, t + 0.06);
+        g1.gain.setValueAtTime(0.5, t); 
+        g1.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+      }
       o.connect(g1); 
       g1.connect(dest); 
       o.start(t); 
-      o.stop(t + 0.15);
+      o.stop(t + 0.2);
       
-      const noiseBuffer = this.getNoise(0.12);
+      const noiseDuration = this.dubstepMode ? 0.35 : 0.12;
+      const noiseBuffer = this.getNoise(noiseDuration);
       if (noiseBuffer) {
         const s = this.audioCtx.createBufferSource();
         const f = this.audioCtx.createBiquadFilter();
         const g2 = this.audioCtx.createGain();
         s.buffer = noiseBuffer; 
         f.type = 'bandpass'; 
-        f.frequency.value = 3500; 
-        f.Q.value = 1.2;
-        g2.gain.setValueAtTime(0.6, t); 
-        g2.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+        if (this.dubstepMode) {
+          f.frequency.value = 1800; 
+          f.Q.value = 1.6;
+          g2.gain.setValueAtTime(1.1, t); 
+          g2.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+        } else {
+          f.frequency.value = 3500; 
+          f.Q.value = 1.2;
+          g2.gain.setValueAtTime(0.6, t); 
+          g2.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+        }
         s.connect(f); 
         f.connect(g2); 
         g2.connect(dest); 
         s.start(t); 
-        s.stop(t + 0.2);
+        s.stop(t + noiseDuration + 0.05);
       }
     } else if (type === 'hihat') {
       const noiseBuffer = this.getNoise(0.06);
@@ -913,19 +938,52 @@ export class DubstepEngine {
 
   private generateBassParams(style?: BassStyle): BassParams {
     const defaultStyles: BassStyle[] = ['wobble', 'reese', 'growl'];
-    const chosenStyle = style || defaultStyles[Math.floor(Math.random() * defaultStyles.length)];
+    let chosenStyle = style || defaultStyles[Math.floor(Math.random() * defaultStyles.length)];
+    if (this.dubstepMode && chosenStyle === 'reese') {
+      chosenStyle = Math.random() < 0.5 ? 'wobble' : 'growl';
+    }
+
+    let lr = 4 + Math.random() * 12;
+    let sf = 40 + Math.random() * 20;
+    let mf = 60 + Math.random() * 40;
+    let fc = 300 + Math.random() * 1100;
+    let fq = 3 + Math.random() * 10;
+    let ld = 250 + Math.random() * 850;
+    let dist = 15 + Math.random() * 75;
+    let vol = 0.45 + Math.random() * 0.45;
+    let dur = 0.8 + Math.random() * 1.6;
+    let dt = (Math.random() - 0.5) * 40;
+
+    if (this.dubstepMode) {
+      sf = 32 + Math.random() * 12; // deep, fundamental floor-shaking sub
+      mf = 55 + Math.random() * 20;
+      fc = 180 + Math.random() * 420;
+      fq = 14 + Math.random() * 14; // screaming vocal formant style
+      
+      const bps = this.bpm / 60; // Beats per second (e.g. 2.33 Hz)
+      const divisions = [0.5, 1, 2, 3, 4, 6, 8];
+      const chosenDiv = divisions[Math.floor(Math.random() * divisions.length)];
+      lr = bps * chosenDiv; // Quantized tempo-subdivided LFO rate
+
+      ld = 1100 + Math.random() * 1000; // massive filter sweep depth
+      dist = 90 + Math.random() * 80;   // saturated overdrive waveshaping
+      vol = 0.85 + Math.random() * 0.15; // raw max volume
+      dur = this.barDur * 0.72 + Math.random() * this.barDur * 0.2; // chops slightly before the snare hits
+      dt = 35 + Math.random() * 50;     // wide unison detuning
+    }
+
     return { 
       style: chosenStyle,
-      sf: 40 + Math.random() * 20, 
-      mf: 60 + Math.random() * 40, 
-      fc: 300 + Math.random() * 1100, 
-      fq: 3 + Math.random() * 10, 
-      lr: 4 + Math.random() * 12, 
-      ld: 250 + Math.random() * 850, 
-      dist: 15 + Math.random() * 75, 
-      vol: 0.45 + Math.random() * 0.45, 
-      dur: 0.8 + Math.random() * 1.6, 
-      dt: (Math.random() - 0.5) * 40 
+      sf, 
+      mf, 
+      fc, 
+      fq, 
+      lr, 
+      ld, 
+      dist, 
+      vol, 
+      dur, 
+      dt 
     };
   }
 
@@ -935,53 +993,147 @@ export class DubstepEngine {
     
     const styles: BassStyle[] = ['wobble', 'reese', 'growl'];
     
-    for (let i = 0; i < 16; i++) {
-      const d: DrumEvent[] = [];
-      const drop = i % 4 === 0;
-      const fill = i % 4 === 3;
-      const build = i === 7;
-      const brk = i === 13;
-      
-      const selectedStyle = styles[Math.floor(Math.random() * styles.length)];
-      this.bassPatterns.push(brk || Math.random() < 0.15 ? null : this.generateBassParams(selectedStyle));
-      
-      d.push({ beat: 0, type: 'kick' }, { beat: 2, type: 'snare' });
-      
-      if (drop && Math.random() < 0.5) {
-        d.push({ beat: 2, type: 'clap' });
-      }
-      
-      const hc = drop ? 16 : fill ? 12 : 8;
-      for (let h = 0; h < hc; h++) {
-        if (h % 2 || drop) {
-          const cymbal = (drop && i % 2 === 1) ? 'ride' : 'hihat';
-          d.push({ beat: (h / hc) * 4, type: cymbal });
+    if (this.dubstepMode) {
+      // Establish an epic 16-bar Dubstep arrangement:
+      // Bars 0-3: Chill Dubstep Beat (Warmup/Intro)
+      // Bars 4-7: Accelerated Snare/Kick Build-Up
+      // Bars 8-15: SAVAGE DUBSTEP DROP!
+      for (let i = 0; i < 16; i++) {
+        const d: DrumEvent[] = [];
+        const isDropBar = i >= 8;
+        const isBuildBar = i === 7;
+        const isPreBuild = i >= 4 && i < 7;
+        const isBreak = i === 3 || i === 15;
+
+        // Bass Generation
+        if (isBuildBar) {
+          // Silent bass or rapid risers during build
+          this.bassPatterns.push(null);
+        } else {
+          // Heavy wobble during drop; slightly lighter growl otherwise
+          const bStyle = Math.random() < 0.6 ? 'wobble' : 'growl';
+          const p = this.generateBassParams(bStyle);
+          if (!isDropBar) {
+            p.vol *= 0.7; // quieter intro bass
+            p.dist *= 0.6;
+          }
+          this.bassPatterns.push(p);
         }
+
+        // Drum Arrangement
+        if (isBuildBar) {
+          // Accelerating Snare Roll Build-up
+          d.push({ beat: 0, type: 'kick' });
+          for (let r = 0; r < 12; r++) {
+            d.push({ beat: 1 + r * 0.16, type: 'snare' });
+          }
+          // Big crash at start of build
+          d.push({ beat: 0, type: 'crash' });
+        } else {
+          // Half-time Dubstep Kick & Snare fundamentals
+          d.push({ beat: 0, type: 'kick' });
+          d.push({ beat: 2, type: 'snare' });
+
+          // Syncopated Kicks
+          if (isDropBar) {
+            // Drop swing kicks: Kick on 0, and on 1.5 or 3.25
+            if (i % 2 === 0) {
+              d.push({ beat: 1.5, type: 'kick' });
+            } else {
+              d.push({ beat: 1.25, type: 'kick' });
+              d.push({ beat: 3.25, type: 'kick' });
+            }
+          } else if (isPreBuild) {
+            if (i % 2 === 1) {
+              d.push({ beat: 1.5, type: 'kick' });
+            }
+          }
+
+          // Hi-hats and Cymbals
+          if (isDropBar) {
+            d.push({ beat: 0, type: 'crash' }); // huge crash on drop bars
+            // Rapid double-time hi-hats
+            for (let h = 0; h < 16; h++) {
+              const hBeat = (h / 16) * 4;
+              const isAccent = h % 4 === 0;
+              d.push({ beat: hBeat, type: isAccent ? 'ride' : 'hihat' });
+            }
+          } else {
+            // Standard pacing hi-hats
+            for (let h = 0; h < 8; h++) {
+              d.push({ beat: (h / 8) * 4, type: 'hihat' });
+            }
+          }
+
+          // Shaker/Snap elements for groove friction
+          if (!isDropBar) {
+            d.push({ beat: 1, type: 'snap' });
+            d.push({ beat: 3, type: 'snap' });
+          }
+
+          // Fills & Breaks
+          if (isBreak) {
+            // Cut standard snares and add a custom fill
+            const snareIndex = d.findIndex(x => x.beat === 2 && x.type === 'snare');
+            if (snareIndex !== -1) d.splice(snareIndex, 1);
+
+            d.push({ beat: 2, type: 'clap' });
+            d.push({ beat: 3, type: 'snare' });
+            d.push({ beat: 3.5, type: 'snare' });
+          }
+        }
+
+        this.drumArrangement.push(d);
       }
-      
-      if (!drop && !build && !fill) {
-        d.push({ beat: 1, type: 'snap' });
-        d.push({ beat: 3, type: 'snap' });
+    } else {
+      for (let i = 0; i < 16; i++) {
+        const d: DrumEvent[] = [];
+        const drop = i % 4 === 0;
+        const fill = i % 4 === 3;
+        const build = i === 7;
+        const brk = i === 13;
+        
+        const selectedStyle = styles[Math.floor(Math.random() * styles.length)];
+        this.bassPatterns.push(brk || Math.random() < 0.15 ? null : this.generateBassParams(selectedStyle));
+        
+        d.push({ beat: 0, type: 'kick' }, { beat: 2, type: 'snare' });
+        
+        if (drop && Math.random() < 0.5) {
+          d.push({ beat: 2, type: 'clap' });
+        }
+        
+        const hc = drop ? 16 : fill ? 12 : 8;
+        for (let h = 0; h < hc; h++) {
+          if (h % 2 || drop) {
+            const cymbal = (drop && i % 2 === 1) ? 'ride' : 'hihat';
+            d.push({ beat: (h / hc) * 4, type: cymbal });
+          }
+        }
+        
+        if (!drop && !build && !fill) {
+          d.push({ beat: 1, type: 'snap' });
+          d.push({ beat: 3, type: 'snap' });
+        }
+        
+        if (drop) d.push({ beat: 0, type: 'crash' });
+        
+        if (build) {
+          for (let r = 0; r < 8; r++) d.push({ beat: 3 + r * 0.12, type: 'snare' });
+          const snareIdx = d.findIndex(x => x.beat === 2 && x.type === 'snare');
+          if (snareIdx !== -1) d.splice(snareIdx, 1);
+        }
+        
+        if (fill) {
+          for (let f = 0; f < 6; f++) d.push({ beat: 3 + f * 0.15, type: 'snare' });
+        }
+        
+        if (brk) { 
+          d.length = 0; 
+          d.push({ beat: 0, type: 'hihat' }, { beat: 2, type: 'crash' }); 
+        }
+        
+        this.drumArrangement.push(d);
       }
-      
-      if (drop) d.push({ beat: 0, type: 'crash' });
-      
-      if (build) {
-        for (let r = 0; r < 8; r++) d.push({ beat: 3 + r * 0.12, type: 'snare' });
-        const snareIdx = d.findIndex(x => x.beat === 2 && x.type === 'snare');
-        if (snareIdx !== -1) d.splice(snareIdx, 1);
-      }
-      
-      if (fill) {
-        for (let f = 0; f < 6; f++) d.push({ beat: 3 + f * 0.15, type: 'snare' });
-      }
-      
-      if (brk) { 
-        d.length = 0; 
-        d.push({ beat: 0, type: 'hihat' }, { beat: 2, type: 'crash' }); 
-      }
-      
-      this.drumArrangement.push(d);
     }
 
     // Generate Chord progression

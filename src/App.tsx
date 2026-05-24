@@ -73,6 +73,7 @@ export default function App() {
   const [mutationRate, setMutationRate] = useState(0.25);
   const [chordGlideEnabled, setChordGlideEnabled] = useState(true);
   const [chordGlideTime, setChordGlideTime] = useState(0.35);
+  const [dubstepMode, setDubstepMode] = useState(false);
 
   useEffect(() => {
     audioEngine.onTick((bar) => {
@@ -99,6 +100,7 @@ export default function App() {
     setMutationRate(audioEngine.mutationRate);
     setChordGlideEnabled(audioEngine.chordGlideEnabled);
     setChordGlideTime((audioEngine.chordGlideTime - 0.05) / 1.15); // scaled 0.05 - 1.2s range to percentage
+    setDubstepMode(audioEngine.dubstepMode);
   }, []);
 
   const handleInit = async () => {
@@ -197,9 +199,38 @@ export default function App() {
     audioEngine.chordVolume = val;
   };
 
-  const handleAmbientOnlyChange = (val: boolean) => {
-    setAmbientOnly(val);
-    audioEngine.ambientOnly = val;
+  const handlePlayModeChange = (mode: 'solo' | 'groove' | 'dubstep') => {
+    let changed = false;
+    if (mode === 'solo') {
+      setAmbientOnly(true);
+      audioEngine.ambientOnly = true;
+      setDubstepMode(false);
+      audioEngine.dubstepMode = false;
+      changed = true;
+    } else if (mode === 'groove') {
+      setAmbientOnly(false);
+      audioEngine.ambientOnly = false;
+      setDubstepMode(false);
+      audioEngine.dubstepMode = false;
+      changed = true;
+    } else if (mode === 'dubstep') {
+      setAmbientOnly(false);
+      audioEngine.ambientOnly = false;
+      setDubstepMode(true);
+      audioEngine.dubstepMode = true;
+      setAmbientSubActive(true);
+      audioEngine.ambientSubActive = true;
+      setBpm(142);
+      audioEngine.setBpm(142);
+      changed = true;
+    }
+
+    if (changed && isReady) {
+      audioEngine.generateLoop();
+      setBassPatterns([...audioEngine.bassPatterns]);
+      setChordProgressionName(audioEngine.chordProgressionPathName);
+      setHasSequence(true);
+    }
   };
 
   const handleAmbientSubActiveChange = (val: boolean) => {
@@ -285,6 +316,10 @@ export default function App() {
   const handleChordGlideTimeChange = (val: number) => {
     setChordGlideTime(val);
     audioEngine.chordGlideTime = 0.05 + val * 1.15; // scales 0 to 1 back to 0.05 - 1.2s range
+  };
+
+  const handleDubstepModeChange = (val: boolean) => {
+    handlePlayModeChange(val ? 'dubstep' : 'groove');
   };
 
   const handleGenLoop = () => {
@@ -689,36 +724,53 @@ export default function App() {
               </div>
             )}
 
-            {/* Playmode Option: Ambient Only (Mute Drums & Bass) */}
+            {/* Playmode Option: Solo / Groove / Dubstep */}
             <div className="flex flex-col gap-2 pt-2 border-t border-white/5">
               <div className="flex justify-between items-center text-[9px] font-bold uppercase text-slate-100">
                 <span>Play Mode</span>
-                <span className={ambientOnly ? "text-pink-400 font-mono text-[11px]" : "text-cyan-400 font-mono text-[11px]"}>
-                  {ambientOnly ? "Ambient Solo ✨" : "Full Groove"}
+                <span className={
+                  dubstepMode 
+                    ? "text-amber-400 font-mono text-[11px]" 
+                    : ambientOnly 
+                    ? "text-pink-400 font-mono text-[11px]" 
+                    : "text-cyan-400 font-mono text-[11px]"
+                }>
+                  {dubstepMode ? "Nuclear Dubstep ☢️" : ambientOnly ? "Ambient Solo ✨" : "Ambient Groove 🌌"}
                 </span>
               </div>
-              <div className="grid grid-cols-2 gap-1.5 p-1 bg-black/25 rounded-lg">
+              <div className="grid grid-cols-3 gap-1 p-1 bg-black/25 rounded-lg">
                 <button
                   type="button"
-                  onClick={() => handleAmbientOnlyChange(false)}
-                  className={`py-1 rounded text-[8px] font-bold uppercase transition-all ${
-                    !ambientOnly
-                      ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
-                      : 'text-white/40 hover:text-white/70 border border-transparent'
+                  onClick={() => handlePlayModeChange('solo')}
+                  className={`py-1 rounded text-[8px] font-bold uppercase transition-all whitespace-nowrap px-1 ${
+                    ambientOnly && !dubstepMode
+                      ? 'bg-pink-500/10 text-pink-400 border border-pink-500/20 shadow-[0_0_6px_rgba(236,72,153,0.15)]'
+                      : 'text-white/45 hover:text-white/70 border border-transparent'
                   }`}
                 >
-                  Full Groove
+                  Solo
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleAmbientOnlyChange(true)}
-                  className={`py-1 rounded text-[8px] font-bold uppercase transition-all ${
-                    ambientOnly
-                      ? 'bg-pink-500/10 text-pink-400 border border-pink-500/20'
-                      : 'text-white/40 hover:text-white/70 border border-transparent'
+                  onClick={() => handlePlayModeChange('groove')}
+                  className={`py-1 rounded text-[8px] font-bold uppercase transition-all whitespace-nowrap px-1 ${
+                    !ambientOnly && !dubstepMode
+                      ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shadow-[0_0_6px_rgba(6,182,212,0.15)]'
+                      : 'text-white/45 hover:text-white/70 border border-transparent'
                   }`}
                 >
-                  Ambient Solo
+                  Groove
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handlePlayModeChange('dubstep')}
+                  className={`py-1 rounded text-[8px] font-bold uppercase transition-all whitespace-nowrap px-1 ${
+                    dubstepMode
+                      ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40 shadow-[0_0_8px_rgba(245,158,11,0.25)]'
+                      : 'text-white/45 hover:text-white/70 border border-transparent'
+                  }`}
+                >
+                  ☢️ Dubstep
                 </button>
               </div>
             </div>
@@ -1067,12 +1119,25 @@ export default function App() {
                   <Square size={14} className={isPlaying ? 'fill-slate-100' : 'fill-transparent'} /> Stop
                 </button>
               </div>
-              <button 
-                onClick={handleGenLoop}
-                className="neo-button px-6 py-2.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-white/5"
-              >
-                Generate New Pattern
-              </button>
+              <div className="flex items-center justify-center sm:justify-end">
+                {dubstepMode ? (
+                  <button 
+                    onClick={handleGenLoop}
+                    className="px-6 py-2.5 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5 whitespace-nowrap bg-amber-500/25 text-amber-300 border border-amber-500/40 shadow-[0_0_15px_rgba(245,158,11,0.35)] animate-pulse hover:bg-amber-500/35 hover:scale-[1.02] active:scale-100 transition-all"
+                    title="Generate a brand new hard-hitting Nuclear Dubstep loop pattern!"
+                  >
+                    <span>☢️ GENERATE DUBSTEP DROP</span>
+                  </button>
+                ) : (
+                  <button 
+                    onClick={handleGenLoop}
+                    className="neo-button px-6 py-2.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-white/5 flex items-center justify-center whitespace-nowrap hover:bg-white/10 hover:scale-[1.02] active:scale-100 transition-all"
+                    title="Generate a brand new peaceful chord progression and rhythm pattern!"
+                  >
+                    Generate New Pattern
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="w-full overflow-x-auto pb-2 -mx-2 px-2 sm:overflow-visible sm:pb-0 sm:mx-0 sm:px-0">

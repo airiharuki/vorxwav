@@ -28,6 +28,15 @@ Say goodbye to jarring chord changes. When the next chord triggers, the notes li
 ### 4. 🎸 Deep Space Bass Co-Pilot
 *   **Ambient Sub:** A room-shaking physical sub-bass voice that rides alongside your chords. It also supports smooth pitch glide to keep the lower dimensions perfectly aligned.
 
+### 5. ☢️ Nuclear Dubstep Demolition Mode (The Rage Zone)
+We put a face-melting, ground-shaking dubstep drop sequencer directly adjacent to our peaceful zen-garden cosmic station. It’s like strapping a twin-turbo jet engine with vibrating bolts to a tranquil hot air balloon.
+*   **Wobble & Growl Destruction:** Disables quiet sub-basses and locks the synthesizer onto aggressive vocal formant filters ("YOY") and overdriven sawtooth waves.
+*   **Tempo-Synchronized LFO Gates:** Automatically quantizes the LFO wobble speeds to strict musical subdivisions (1/4 notes, 1/8 note sweeps, syncopated triplets, and insane 32nd note machine-gun rolls) locked to 142 BPM.
+*   **Procedural Halftime Drums:** Custom-coded, heavily-saturated instruments! 
+    *   **Kick:** Re-mapped to a low, booming physical sweep starting at 200Hz with a long sub bass tail.
+    *   **Snare:** Swaps the soft snap snare for a giant, stacked sawtooth body layered with a gated, resonant noise blast.
+*   **Savage Drop Arrangement:** Re-sequences your loop into a classic electronic layout: 4 bars of half-time warmup groove, 4 bars of driving pre-builds culminating in a high-speed snare roll build-up with a dramatic silent drop gap, followed by a total, unrestrained 8-bar drop of pure wobbling chaos!
+
 ---
 
 ## 🖲️ Control Deck Breakdown (For Aspiring Astromusicians)
