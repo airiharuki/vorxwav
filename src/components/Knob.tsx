@@ -6,9 +6,10 @@ interface KnobProps {
   onChange: (val: number) => void;
   accentColor?: 'cyan' | 'pink';
   defaultValue?: number;
+  displayValue?: string;
 }
 
-export function Knob({ label, value, onChange, accentColor = 'cyan', defaultValue = 0.5 }: KnobProps) {
+export function Knob({ label, value, onChange, accentColor = 'cyan', defaultValue = 0.5, displayValue }: KnobProps) {
   const knobRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const startYRef = useRef(0);
@@ -94,7 +95,7 @@ export function Knob({ label, value, onChange, accentColor = 'cyan', defaultValu
           {label}
         </span>
         <span className="text-[9px] font-mono mt-1 text-white/50 tracking-tighter">
-          {Math.round(value * 100)}%
+          {displayValue !== undefined ? displayValue : `${Math.round(value * 100)}%`}
         </span>
       </div>
     </div>

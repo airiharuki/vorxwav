@@ -5,6 +5,27 @@ import { Sequencer } from './components/Sequencer';
 import { Visualizer } from './components/Visualizer';
 import { Knob } from './components/Knob';
 
+const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+function transposeChordName(name: string, semitones: number): string {
+  if (semitones === 0 || !name) return name;
+  const match = name.match(/^([A-G]#?|Bb|Eb|Ab|Db|Gb)/);
+  if (!match) return name;
+  const root = match[1];
+  let pc = NOTE_NAMES.indexOf(root);
+  if (pc === -1) {
+    if (root === "Bb") pc = 10;
+    else if (root === "Eb") pc = 3;
+    else if (root === "Ab") pc = 8;
+    else if (root === "Db") pc = 1;
+    else if (root === "Gb") pc = 6;
+    else return name;
+  }
+  const newPc = (pc + semitones + 120) % 12;
+  const newRoot = NOTE_NAMES[newPc];
+  return newRoot + name.slice(root.length);
+}
+
 export default function App() {
   const [isReady, setIsReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -35,12 +56,23 @@ export default function App() {
   const [chordProgressionName, setChordProgressionName] = useState('Nebula Drift');
   const [ambientOnly, setAmbientOnly] = useState(false);
   const [ambientSubActive, setAmbientSubActive] = useState(false);
+  const [scaleLocked, setScaleLocked] = useState(false);
   const [adsrEnabled, setAdsrEnabled] = useState(false);
   const [chordLengthMult, setChordLengthMult] = useState(1.0);
   const [chordAttack, setChordAttack] = useState(0.15);
   const [chordDecay, setChordDecay] = useState(0.6);
   const [chordSustain, setChordSustain] = useState(0.4);
   const [chordRelease, setChordRelease] = useState(1.5);
+  const [keyTranspose, setKeyTranspose] = useState(0);
+
+  // Chord Drift and Mutation States
+  const [chordDriftEnabled, setChordDriftEnabled] = useState(false);
+  const [chordDriftAmount, setChordDriftAmount] = useState(0.35);
+  const [chordDriftSpeed, setChordDriftSpeed] = useState(0.4);
+  const [harmonicMutationActive, setHarmonicMutationActive] = useState(false);
+  const [mutationRate, setMutationRate] = useState(0.25);
+  const [chordGlideEnabled, setChordGlideEnabled] = useState(true);
+  const [chordGlideTime, setChordGlideTime] = useState(0.35);
 
   useEffect(() => {
     audioEngine.onTick((bar) => {
@@ -52,12 +84,21 @@ export default function App() {
     setChordProgressionName(audioEngine.chordProgressionPathName);
     setAmbientOnly(audioEngine.ambientOnly);
     setAmbientSubActive(audioEngine.ambientSubActive);
+    setScaleLocked(audioEngine.scaleLocked);
     setAdsrEnabled(audioEngine.adsrEnabled);
     setChordLengthMult((audioEngine.chordLengthMult - 0.2) / 3.8);
     setChordAttack((audioEngine.chordAttack - 0.005) / 2.995);
     setChordDecay((audioEngine.chordDecay - 0.01) / 2.99);
     setChordSustain(audioEngine.chordSustain);
     setChordRelease((audioEngine.chordRelease - 0.01) / 4.99);
+    setKeyTranspose(audioEngine.keyTranspose);
+    setChordDriftEnabled(audioEngine.chordDriftEnabled);
+    setChordDriftAmount(audioEngine.chordDriftAmount);
+    setChordDriftSpeed(audioEngine.chordDriftSpeed);
+    setHarmonicMutationActive(audioEngine.harmonicMutationActive);
+    setMutationRate(audioEngine.mutationRate);
+    setChordGlideEnabled(audioEngine.chordGlideEnabled);
+    setChordGlideTime((audioEngine.chordGlideTime - 0.05) / 1.15); // scaled 0.05 - 1.2s range to percentage
   }, []);
 
   const handleInit = async () => {
@@ -194,6 +235,56 @@ export default function App() {
   const handleChordReleaseChange = (val: number) => {
     setChordRelease(val);
     audioEngine.chordRelease = 0.01 + val * 4.99;
+  };
+
+  const handleKeyTransposeChange = (val: number) => {
+    setKeyTranspose(val);
+    audioEngine.keyTranspose = val;
+  };
+
+  const handleScaleLockedChange = (val: boolean) => {
+    setScaleLocked(val);
+    audioEngine.scaleLocked = val;
+  };
+
+  const handleScalePresetChange = (name: string) => {
+    audioEngine.changeScalePreset(name);
+    setChordProgressionName(audioEngine.chordProgressionPathName);
+  };
+
+  const handleChordDriftEnabledChange = (val: boolean) => {
+    setChordDriftEnabled(val);
+    audioEngine.chordDriftEnabled = val;
+  };
+
+  const handleChordDriftAmountChange = (val: number) => {
+    setChordDriftAmount(val);
+    audioEngine.chordDriftAmount = val;
+  };
+
+  const handleChordDriftSpeedChange = (val: number) => {
+    setChordDriftSpeed(val);
+    audioEngine.chordDriftSpeed = val;
+  };
+
+  const handleHarmonicMutationActiveChange = (val: boolean) => {
+    setHarmonicMutationActive(val);
+    audioEngine.harmonicMutationActive = val;
+  };
+
+  const handleMutationRateChange = (val: number) => {
+    setMutationRate(val);
+    audioEngine.mutationRate = val;
+  };
+
+  const handleChordGlideEnabledChange = (val: boolean) => {
+    setChordGlideEnabled(val);
+    audioEngine.chordGlideEnabled = val;
+  };
+
+  const handleChordGlideTimeChange = (val: number) => {
+    setChordGlideTime(val);
+    audioEngine.chordGlideTime = 0.05 + val * 1.15; // scales 0 to 1 back to 0.05 - 1.2s range
   };
 
   const handleGenLoop = () => {
@@ -445,6 +536,70 @@ export default function App() {
               <span className="text-[10px] font-mono text-white/50">{chordProgressionName}</span>
             </div>
 
+            {/* Scale selection & Locking options - requested by user */}
+            <div className="flex flex-col gap-2 p-2.5 bg-black/35 rounded-xl border border-white/[0.04] shadow-inner">
+              <div className="flex justify-between items-center text-[9px] font-bold uppercase text-slate-100">
+                <span>Select Scale Preset</span>
+                <span className={scaleLocked ? "text-pink-400 font-mono text-[10px]" : "text-white/45 font-mono text-[10px]"}>
+                  {scaleLocked ? "Locked 🔒" : "Unlocked 🔓"}
+                </span>
+              </div>
+
+              {/* Grid of presets */}
+              <div className="grid grid-cols-3 gap-1 bg-black/20 rounded-lg p-1">
+                <button
+                  type="button"
+                  onClick={() => handleScalePresetChange('Nebula Drift')}
+                  className={`py-1.5 rounded text-[8px] font-bold uppercase transition-all truncate px-1 ${
+                    chordProgressionName === 'Nebula Drift'
+                      ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shadow-[0_0_6px_rgba(6,182,212,0.15)]'
+                      : 'text-white/45 hover:text-white/70 border border-transparent'
+                  }`}
+                  title="Switch to Nebula Drift Scale"
+                >
+                  Nebula Drift
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleScalePresetChange('Cyberpunk Sadness')}
+                  className={`py-1.5 rounded text-[8px] font-bold uppercase transition-all truncate px-1 ${
+                    chordProgressionName === 'Cyberpunk Sadness'
+                      ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shadow-[0_0_6px_rgba(6,182,212,0.15)]'
+                      : 'text-white/45 hover:text-white/70 border border-transparent'
+                  }`}
+                  title="Switch to Cyberpunk Sadness Scale"
+                >
+                  Cyberpunk
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleScalePresetChange('Synthwave Skyline')}
+                  className={`py-1.5 rounded text-[8px] font-bold uppercase transition-all truncate px-1 ${
+                    chordProgressionName === 'Synthwave Skyline'
+                      ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 shadow-[0_0_6px_rgba(6,182,212,0.15)]'
+                      : 'text-white/45 hover:text-white/70 border border-transparent'
+                  }`}
+                  title="Switch to Synthwave Skyline Scale"
+                >
+                  Synthwave
+                </button>
+              </div>
+
+              {/* Lock Scale Option Button */}
+              <button
+                type="button"
+                onClick={() => handleScaleLockedChange(!scaleLocked)}
+                className={`w-full py-1.5 rounded-lg text-[9px] font-bold uppercase tracking-wider border transition-all flex items-center justify-center gap-1.5 ${
+                  scaleLocked
+                    ? 'bg-pink-500/10 text-pink-400 border-pink-500/20 shadow-[0_0_10px_rgba(236,72,153,0.2)]'
+                    : 'bg-white/5 text-white/45 border-white/5 hover:bg-white/10 hover:text-white'
+                }`}
+              >
+                <span>{scaleLocked ? "Scale is Locked" : "Scale is Unlocked"}</span>
+                <span className="text-[10px]">{scaleLocked ? "🔒" : "🔓"}</span>
+              </button>
+            </div>
+
             {/* Selection buttons for Chord Styles */}
             <div className="grid grid-cols-2 gap-1.5 p-1 bg-black/30 rounded-lg">
               <button
@@ -514,7 +669,9 @@ export default function App() {
                 <div className="flex flex-col">
                   <span className="text-[8px] uppercase tracking-wider text-white/40">Active bar chord</span>
                   <span className="text-xs font-black font-mono text-cyan-300">
-                    {audioEngine.chordProgression[currentBar]?.name || "N/A"}
+                    {audioEngine.chordProgression[currentBar]
+                      ? transposeChordName(audioEngine.chordProgression[currentBar].name, keyTranspose)
+                      : "N/A"}
                   </span>
                 </div>
                 <div className="flex items-center gap-0.5 h-6">
@@ -684,6 +841,196 @@ export default function App() {
                   onChange={(e) => handleChordLengthMultChange(parseFloat(e.target.value))}
                   className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-pink-500 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-[0_0_10px_rgba(236,72,153,0.8)]"
                 />
+              </div>
+
+              {/* Pitch Transpose & Key Control */}
+              <div className="flex flex-col gap-2 pt-2 border-t border-white/5">
+                <div className="flex justify-between items-center text-[9px] font-bold uppercase text-slate-100">
+                  <span>Pitch Key Shift</span>
+                  <span className="text-cyan-400 font-mono text-[11px]">
+                    {keyTranspose === 0 ? "Original Key" : keyTranspose > 0 ? `+${keyTranspose} Semitones` : `${keyTranspose} Semitones`}
+                  </span>
+                </div>
+                
+                <div className="flex items-center gap-4 bg-black/35 rounded-xl p-2.5 border border-white/5">
+                  <div className="flex-1 flex flex-col gap-1.5 justify-center">
+                    <span className="text-[8px] uppercase font-bold text-white/30 tracking-wider">Quick Select</span>
+                    <div className="grid grid-cols-4 gap-1">
+                      <button
+                        type="button"
+                        onClick={() => handleKeyTransposeChange(-12)}
+                        className={`py-1 text-[8px] font-bold font-mono rounded ${
+                          keyTranspose === -12 ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 shadow-[0_0_6px_rgba(6,182,212,0.15)]" : "bg-black/30 text-white/50 hover:text-white"
+                        }`}
+                        title="Transpose down 1 Octave"
+                      >
+                        -12st
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleKeyTransposeChange(-5)}
+                        className={`py-1 text-[8px] font-bold font-mono rounded ${
+                          keyTranspose === -5 ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 shadow-[0_0_6px_rgba(6,182,212,0.15)]" : "bg-black/30 text-white/50 hover:text-white"
+                        }`}
+                        title="Transpose down a Perfect 4th"
+                      >
+                        -5st
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleKeyTransposeChange(0)}
+                        className={`py-1 text-[8px] font-bold font-mono rounded ${
+                          keyTranspose === 0 ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 shadow-[0_0_6px_rgba(6,182,212,0.15)]" : "bg-black/30 text-white/50 hover:text-white"
+                        }`}
+                        title="Reset to Original"
+                      >
+                        0st
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleKeyTransposeChange(7)}
+                        className={`py-1 text-[8px] font-bold font-mono rounded ${
+                          keyTranspose === 7 ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 shadow-[0_0_6px_rgba(6,182,212,0.15)]" : "bg-black/30 text-white/50 hover:text-white"
+                        }`}
+                        title="Transpose up a Perfect 5th"
+                      >
+                        +7st
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1 mt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => handleKeyTransposeChange(Math.max(-12, keyTranspose - 1))}
+                        className="py-1 text-[8px] font-bold uppercase rounded bg-black/25 text-white/60 hover:text-cyan-400/90 transition-colors"
+                      >
+                        ◄ Semitone
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleKeyTransposeChange(Math.min(12, keyTranspose + 1))}
+                        className="py-1 text-[8px] font-bold uppercase rounded bg-black/25 text-white/60 hover:text-cyan-400/90 transition-colors"
+                      >
+                        Semitone ►
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex shrink-0 justify-center">
+                    <Knob
+                      label="Key Tune"
+                      value={(keyTranspose + 12) / 24}
+                      onChange={(pct) => handleKeyTransposeChange(Math.round((pct * 24) - 12))}
+                      accentColor="cyan"
+                      defaultValue={0.5}
+                      displayValue={keyTranspose === 0 ? "0 st" : keyTranspose > 0 ? `+${keyTranspose} st` : `${keyTranspose} st`}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Chord Drift & Mutation Engine */}
+              <div className="flex flex-col gap-2 pt-2.5 border-t border-white/5">
+                <div className="flex justify-between items-center text-[9px] font-bold uppercase text-slate-100">
+                  <span>Chord Drift & Evolution</span>
+                  <span className={chordDriftEnabled || harmonicMutationActive ? "text-cyan-400 font-mono text-[10px]" : "text-white/45 font-mono text-[10px]"}>
+                    {chordDriftEnabled && harmonicMutationActive ? "Full Drift" : chordDriftEnabled ? "Pitch Drift" : harmonicMutationActive ? "Voice Drift" : "Static"}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 bg-black/20 p-2 rounded-xl border border-white/[0.03]">
+                  {/* Left Column: Pitch Wobble Drift */}
+                  <div className="flex flex-col gap-2 p-1.5 bg-black/25 rounded-lg border border-white/[0.02]">
+                    <button
+                      type="button"
+                      onClick={() => handleChordDriftEnabledChange(!chordDriftEnabled)}
+                      className={`w-full py-1 rounded text-[8px] font-bold uppercase transition-all flex items-center justify-center gap-1 ${
+                        chordDriftEnabled
+                          ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/35 shadow-[0_0_6px_rgba(6,182,212,0.15)]'
+                          : 'bg-white/[0.02] text-white/40 border border-transparent hover:text-white/70'
+                      }`}
+                    >
+                      <span>Pitch Drift</span>
+                      <span>{chordDriftEnabled ? "⬤" : "◯"}</span>
+                    </button>
+                    {chordDriftEnabled && (
+                      <div className="flex justify-around items-center gap-1 pt-1">
+                        <Knob
+                          label="Wobble"
+                          value={chordDriftAmount}
+                          onChange={handleChordDriftAmountChange}
+                          accentColor="cyan"
+                          defaultValue={0.35}
+                        />
+                        <Knob
+                          label="Speed"
+                          value={chordDriftSpeed}
+                          onChange={handleChordDriftSpeedChange}
+                          accentColor="cyan"
+                          defaultValue={0.4}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Right Column: Harmonic / Voice Drift */}
+                  <div className="flex flex-col gap-2 p-1.5 bg-black/25 rounded-lg border border-white/[0.02]">
+                    <button
+                      type="button"
+                      onClick={() => handleHarmonicMutationActiveChange(!harmonicMutationActive)}
+                      className={`w-full py-1 rounded text-[8px] font-bold uppercase transition-all flex items-center justify-center gap-1 ${
+                        harmonicMutationActive
+                          ? 'bg-pink-500/15 text-pink-400 border border-pink-500/35 shadow-[0_0_6px_rgba(236,72,153,0.15)]'
+                          : 'bg-white/[0.02] text-white/40 border border-transparent hover:text-white/70'
+                      }`}
+                    >
+                      <span>Harmonic</span>
+                      <span>{harmonicMutationActive ? "⬤" : "◯"}</span>
+                    </button>
+                    {harmonicMutationActive && (
+                      <div className="flex justify-center items-center gap-1 pt-1">
+                        <Knob
+                          label="Rate"
+                          value={mutationRate}
+                          onChange={handleMutationRateChange}
+                          accentColor="pink"
+                          defaultValue={0.25}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Glide / Legato Slides Control */}
+                <div className="flex items-center justify-between gap-4 p-2 bg-black/25 rounded-xl border border-white/[0.03]">
+                  <div className="flex-1 flex flex-col gap-0.5">
+                    <span className="text-[8px] uppercase font-bold text-slate-300 tracking-wider">Smooth Chord Glide</span>
+                    <p className="text-[8px] text-white/30 leading-tight">Glides note pitches smoothly on chord changes for a cohesive soundscape.</p>
+                    <button
+                      type="button"
+                      onClick={() => handleChordGlideEnabledChange(!chordGlideEnabled)}
+                      className={`py-1 rounded text-[8px] font-bold uppercase transition-all flex items-center justify-center gap-1.5 border mt-1.5 ${
+                        chordGlideEnabled
+                          ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20 shadow-[0_0_6px_rgba(6,182,212,0.15)]'
+                          : 'bg-black/35 text-white/30 border-transparent hover:text-white'
+                      }`}
+                    >
+                      <span>{chordGlideEnabled ? "Glide Active" : "Glide Inactive"}</span>
+                      <span className="text-[9px]">{chordGlideEnabled ? "●" : "◯"}</span>
+                    </button>
+                  </div>
+                  {chordGlideEnabled && (
+                    <div className="flex shrink-0 pr-1">
+                      <Knob
+                        label="Glide Rate"
+                        value={chordGlideTime}
+                        onChange={handleChordGlideTimeChange}
+                        accentColor="cyan"
+                        defaultValue={0.26}
+                        displayValue={`${Math.round((0.05 + chordGlideTime * 1.15) * 1000)}ms`}
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>

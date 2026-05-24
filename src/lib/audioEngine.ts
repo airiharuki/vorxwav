@@ -122,6 +122,19 @@ export class DubstepEngine {
   public chordProgressionPathName = "Nebula Drift";
   public ambientOnly = false;
   public ambientSubActive = false;
+  public scaleLocked = false;
+  public keyTranspose = 0; // Transposable key shift in semitones (-12 to +12)
+
+  // Custom Chord Drift & Mutation controls
+  public chordDriftEnabled = false;
+  public chordDriftAmount = 0.35; // 0.0 to 1.0 (detuning depth)
+  public chordDriftSpeed = 0.4;  // 0.0 to 1.0 (LFO speed of detuning)
+  public harmonicMutationActive = false; // Chords morph their notes on their own
+  public mutationRate = 0.25; // Probability/strength of note variations
+  public chordGlideEnabled = true; // Slide pitches on chord changes
+  public chordGlideTime = 0.35; // Glide duration in seconds (0.05 to 1.2s)
+  private lastPlayedFreqs: number[] = [];
+  private lastSubMidi?: number;
   
   // Custom ADSR and Chord length scaling values
   public adsrEnabled = false;
@@ -408,21 +421,23 @@ export class DubstepEngine {
 
   private playBass(t: number, dur: number, p: BassParams) {
     if (!this.audioCtx || !this.masterGain) return;
+    const transFactor = Math.pow(2, this.keyTranspose / 12);
+
     const sub = this.audioCtx.createOscillator();
     sub.type = 'sine'; 
-    sub.frequency.value = p.sf; 
+    sub.frequency.value = p.sf * transFactor; 
     sub.detune.value = p.dt;
 
     const mid = this.audioCtx.createOscillator();
     mid.type = p.style === 'reese' ? 'sawtooth' : (p.style === 'growl' ? 'square' : 'sawtooth'); 
-    mid.frequency.value = p.mf; 
+    mid.frequency.value = p.mf * transFactor; 
     mid.detune.value = p.dt * 1.5;
     
     let mid2: OscillatorNode | null = null;
     if (p.style === 'reese') {
       mid2 = this.audioCtx.createOscillator();
       mid2.type = 'sawtooth';
-      mid2.frequency.value = p.mf;
+      mid2.frequency.value = p.mf * transFactor;
       // Ensure mid2.detune is set to a negative value relative to mid.detune to create a phasing effect
       mid2.detune.value = mid.detune.value - 24; 
     }
@@ -492,13 +507,19 @@ export class DubstepEngine {
     lfo.start(t); lfo.stop(end);
   }
 
-  private playRhodesVoice(t: number, freq: number, dur: number, vol: number) {
+  private playRhodesVoice(t: number, freq: number, dur: number, vol: number, fromFreq?: number) {
     if (!this.audioCtx || !this.masterGain) return;
     const ctx = this.audioCtx;
 
     const carrier = ctx.createOscillator();
     carrier.type = 'sine';
-    carrier.frequency.setValueAtTime(freq, t);
+    
+    if (fromFreq !== undefined && fromFreq !== freq && this.chordGlideEnabled) {
+      carrier.frequency.setValueAtTime(fromFreq, t);
+      carrier.frequency.exponentialRampToValueAtTime(freq, t + this.chordGlideTime);
+    } else {
+      carrier.frequency.setValueAtTime(freq, t);
+    }
 
     // Vibrato
     const vibrato = ctx.createOscillator();
@@ -511,7 +532,13 @@ export class DubstepEngine {
     // Modulator (FM chime body)
     const modulator = ctx.createOscillator();
     modulator.type = 'sine';
-    modulator.frequency.setValueAtTime(freq * 3.5, t);
+    
+    if (fromFreq !== undefined && fromFreq !== freq && this.chordGlideEnabled) {
+      modulator.frequency.setValueAtTime(fromFreq * 3.5, t);
+      modulator.frequency.exponentialRampToValueAtTime(freq * 3.5, t + this.chordGlideTime);
+    } else {
+      modulator.frequency.setValueAtTime(freq * 3.5, t);
+    }
 
     const modGain = ctx.createGain();
     modGain.gain.setValueAtTime(freq * 1.5, t);
@@ -559,7 +586,7 @@ export class DubstepEngine {
     carrier.stop(endT);
   }
 
-  private playTwinkleVoice(t: number, freq: number, dur: number, vol: number) {
+  private playTwinkleVoice(t: number, freq: number, dur: number, vol: number, fromFreq?: number) {
     if (!this.audioCtx || !this.masterGain) return;
     const ctx = this.audioCtx;
 
@@ -568,13 +595,29 @@ export class DubstepEngine {
       twinkleFreq *= 2;
     }
 
+    let fromTwinkleFreq = fromFreq;
+    if (fromTwinkleFreq !== undefined) {
+      while (fromTwinkleFreq < 450) {
+        fromTwinkleFreq *= 2;
+      }
+    }
+
     const osc1 = ctx.createOscillator();
     osc1.type = 'sine';
-    osc1.frequency.setValueAtTime(twinkleFreq, t);
 
     const osc2 = ctx.createOscillator();
     osc2.type = 'triangle';
-    osc2.frequency.setValueAtTime(twinkleFreq * 2.01, t);
+
+    if (fromTwinkleFreq !== undefined && fromTwinkleFreq !== twinkleFreq && this.chordGlideEnabled) {
+      osc1.frequency.setValueAtTime(fromTwinkleFreq, t);
+      osc1.frequency.exponentialRampToValueAtTime(twinkleFreq, t + this.chordGlideTime);
+      
+      osc2.frequency.setValueAtTime(fromTwinkleFreq * 2.01, t);
+      osc2.frequency.exponentialRampToValueAtTime(twinkleFreq * 2.01, t + this.chordGlideTime);
+    } else {
+      osc1.frequency.setValueAtTime(twinkleFreq, t);
+      osc2.frequency.setValueAtTime(twinkleFreq * 2.01, t);
+    }
 
     const filter = ctx.createBiquadFilter();
     filter.type = 'highpass';
@@ -632,13 +675,19 @@ export class DubstepEngine {
     osc2.stop(endT);
   }
 
-  private playPluckVoice(t: number, freq: number, dur: number, vol: number) {
+  private playPluckVoice(t: number, freq: number, dur: number, vol: number, fromFreq?: number) {
     if (!this.audioCtx || !this.masterGain) return;
     const ctx = this.audioCtx;
 
     const osc = ctx.createOscillator();
     osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(freq, t);
+    
+    if (fromFreq !== undefined && fromFreq !== freq && this.chordGlideEnabled) {
+      osc.frequency.setValueAtTime(fromFreq, t);
+      osc.frequency.exponentialRampToValueAtTime(freq, t + this.chordGlideTime);
+    } else {
+      osc.frequency.setValueAtTime(freq, t);
+    }
 
     const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
@@ -684,20 +733,33 @@ export class DubstepEngine {
     osc.stop(endT);
   }
 
-  private playAmbientSubVoice(t: number, midiNote: number, dur: number) {
+  private playAmbientSubVoice(t: number, midiNote: number, dur: number, fromMidiNote?: number) {
     if (!this.audioCtx || !this.masterGain) return;
     const ctx = this.audioCtx;
 
-    const freq = 440 * Math.pow(2, (midiNote - 69) / 12);
+    const freq = 440 * Math.pow(2, ((midiNote + this.keyTranspose) - 69) / 12);
+    let fromFreq: number | undefined;
+    if (fromMidiNote !== undefined) {
+      fromFreq = 440 * Math.pow(2, ((fromMidiNote + this.keyTranspose) - 69) / 12);
+    }
 
     const subOsc = ctx.createOscillator();
     subOsc.type = 'sine';
-    subOsc.frequency.setValueAtTime(freq, t);
 
     // Subtle 2nd harmonic for small speaker audibility
     const satOsc = ctx.createOscillator();
     satOsc.type = 'triangle';
-    satOsc.frequency.setValueAtTime(freq * 2, t);
+
+    if (fromFreq !== undefined && fromFreq !== freq && this.chordGlideEnabled) {
+      subOsc.frequency.setValueAtTime(fromFreq, t);
+      subOsc.frequency.exponentialRampToValueAtTime(freq, t + this.chordGlideTime);
+
+      satOsc.frequency.setValueAtTime(fromFreq * 2, t);
+      satOsc.frequency.exponentialRampToValueAtTime(freq * 2, t + this.chordGlideTime);
+    } else {
+      subOsc.frequency.setValueAtTime(freq, t);
+      satOsc.frequency.setValueAtTime(freq * 2, t);
+    }
 
     const subGain = ctx.createGain();
     const satGain = ctx.createGain();
@@ -741,32 +803,112 @@ export class DubstepEngine {
     const dur = this.barDur * 0.92 * this.chordLengthMult;
 
     // Play optional deep physical sub bass under chords
+    let subMidi: number | undefined;
     if (this.ambientSubActive && chord.notes.length > 0) {
       const rootMidi = Math.min(...chord.notes);
-      let subMidi = rootMidi;
+      subMidi = rootMidi;
       while (subMidi > 45) {
         subMidi -= 12;
       }
       while (subMidi < 28) {
         subMidi += 12;
       }
-      this.playAmbientSubVoice(t, subMidi, dur);
+      this.playAmbientSubVoice(t, subMidi, dur, this.lastSubMidi);
     }
+    this.lastSubMidi = subMidi;
+
+    const nextLastPlayedFreqs: number[] = [];
+    const oldFreqsPool = [...this.lastPlayedFreqs];
 
     chord.notes.forEach((midi, idx) => {
-      const freq = 440 * Math.pow(2, (midi - 69) / 12);
+      // Calculate microtonal LFO pitch drift for rich tape/VCO vibe on each note voice separately
+      let driftSemitones = 0;
+      if (this.chordDriftEnabled) {
+        const lfoSpeed = 0.05 + this.chordDriftSpeed * 1.8; // slow drift oscillation (0.05Hz - 1.85Hz)
+        const lfoPhase = t * lfoSpeed + (idx * 2.39); // staggered phase offset per voice
+        const driftDepth = this.chordDriftAmount * 0.45; // up to 45 cents detuning range
+        driftSemitones = Math.sin(lfoPhase) * driftDepth;
+        // Introduce tape-flutter micro-jitter
+        driftSemitones += (Math.cos(t * 8.2 + idx * 4.7) * 0.04 * this.chordDriftAmount);
+      }
+
+      const freq = 440 * Math.pow(2, ((midi + this.keyTranspose + driftSemitones) - 69) / 12);
+      nextLastPlayedFreqs.push(freq);
+
+      let fromFreq: number | undefined;
+      if (oldFreqsPool.length > 0) {
+        let nearestIdx = 0;
+        let minDist = Infinity;
+        for (let j = 0; j < oldFreqsPool.length; j++) {
+          const dist = Math.abs(oldFreqsPool[j] - freq);
+          if (dist < minDist) {
+            minDist = dist;
+            nearestIdx = j;
+          }
+        }
+        fromFreq = oldFreqsPool[nearestIdx];
+        oldFreqsPool.splice(nearestIdx, 1);
+      }
 
       if (style === 'rhodes') {
         const humanizedT = t + Math.random() * 0.015;
-        this.playRhodesVoice(humanizedT, freq, dur, vol * 0.16);
+        this.playRhodesVoice(humanizedT, freq, dur, vol * 0.16, fromFreq);
       } else if (style === 'twinkle') {
         const staggeredT = t + idx * 0.06;
-        this.playTwinkleVoice(staggeredT, freq, dur * 0.5, vol * 0.12);
+        this.playTwinkleVoice(staggeredT, freq, dur * 0.5, vol * 0.12, fromFreq);
       } else if (style === 'pluck') {
         const humanizedT = t + Math.random() * 0.008;
-        this.playPluckVoice(humanizedT, freq, dur * 0.4, vol * 0.14);
+        this.playPluckVoice(humanizedT, freq, dur * 0.4, vol * 0.14, fromFreq);
       }
     });
+
+    this.lastPlayedFreqs = nextLastPlayedFreqs;
+  }
+
+  private getMutatedChord(chord: Chord): Chord {
+    if (!chord.notes || chord.notes.length <= 1) return chord;
+    const mutatedNotes = [...chord.notes];
+    
+    // Pick a random upper voice (index >= 1) to drift
+    const voiceIdx = 1 + Math.floor(Math.random() * (mutatedNotes.length - 1));
+    const r = Math.random();
+    
+    if (r < 0.35) {
+      // Octave transposition drift
+      const direction = Math.random() < 0.5 ? -12 : 12;
+      const targetNote = mutatedNotes[voiceIdx] + direction;
+      if (targetNote >= 43 && targetNote <= 84) {
+        mutatedNotes[voiceIdx] = targetNote;
+      }
+    } else if (r < 0.70) {
+      // Scale-adjacent step drift (tensions/extensions)
+      const shift = Math.random() < 0.5 ? -1 : 1;
+      const targetNote = mutatedNotes[voiceIdx] + shift;
+      if (targetNote >= 48 && targetNote <= 76) {
+        mutatedNotes[voiceIdx] = targetNote;
+      }
+    } else {
+      // Perfect 5th/4th voice-leading shifts
+      const shift = Math.random() < 0.5 ? 7 : -5;
+      const targetNote = mutatedNotes[voiceIdx] + shift;
+      if (targetNote >= 45 && targetNote <= 80) {
+        mutatedNotes[voiceIdx] = targetNote;
+      }
+    }
+
+    const root = mutatedNotes[0];
+    const upperVoices = mutatedNotes.slice(1).sort((a, b) => a - b);
+
+    // Keep active note name formatted elegantly with a Drift indicator symbol "≎"
+    let mutatedName = chord.name;
+    if (!mutatedName.endsWith(" ≎")) {
+      mutatedName += " ≎";
+    }
+
+    return {
+      name: mutatedName,
+      notes: [root, ...upperVoices]
+    };
   }
 
   private generateBassParams(style?: BassStyle): BassParams {
@@ -843,12 +985,30 @@ export class DubstepEngine {
     }
 
     // Generate Chord progression
-    const selectedPreset = CHORD_PRESETS[Math.floor(Math.random() * CHORD_PRESETS.length)];
+    let selectedPreset = CHORD_PRESETS[Math.floor(Math.random() * CHORD_PRESETS.length)];
+    if (this.scaleLocked) {
+      const found = CHORD_PRESETS.find(p => p.name === this.chordProgressionPathName);
+      if (found) {
+        selectedPreset = found;
+      }
+    }
     this.chordProgressionPathName = selectedPreset.name;
     this.chordProgression = [];
     for (let i = 0; i < 16; i++) {
       const chordIdx = Math.floor(i / 2) % 8;
       this.chordProgression.push(selectedPreset.chords[chordIdx]);
+    }
+  }
+
+  public changeScalePreset(presetName: string) {
+    const found = CHORD_PRESETS.find(p => p.name === presetName);
+    if (found) {
+      this.chordProgressionPathName = found.name;
+      this.chordProgression = [];
+      for (let i = 0; i < 16; i++) {
+        const chordIdx = Math.floor(i / 2) % 8;
+        this.chordProgression.push(found.chords[chordIdx]);
+      }
     }
   }
 
@@ -870,9 +1030,16 @@ export class DubstepEngine {
       }
 
       // Play Ambient Chords
-      const activeChord = this.chordProgression[this.currentBar];
+      let activeChord = this.chordProgression[this.currentBar];
       if (activeChord) {
-        this.playChord(this.nextNoteTime, activeChord);
+        if (this.harmonicMutationActive && Math.random() < this.mutationRate) {
+          const mutated = this.getMutatedChord(activeChord);
+          // Mutate the stored chord so that it evolves and updates visually
+          this.chordProgression[this.currentBar] = mutated;
+          this.playChord(this.nextNoteTime, mutated);
+        } else {
+          this.playChord(this.nextNoteTime, activeChord);
+        }
       }
       
       this.onTickCallback(this.currentBar);
