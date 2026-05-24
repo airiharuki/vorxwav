@@ -4,6 +4,7 @@ import { audioEngine } from './lib/audioEngine';
 import { Sequencer } from './components/Sequencer';
 import { Visualizer } from './components/Visualizer';
 import { Knob } from './components/Knob';
+import { PatchLab } from './components/PatchLab';
 
 const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
@@ -77,6 +78,11 @@ export default function App() {
   const [unisonWidth, setUnisonWidth] = useState(0.6);
   const [currentKey, setCurrentKey] = useState('C');
   const [currentScaleType, setCurrentScaleType] = useState('minor');
+  const [workspace, setWorkspace] = useState<'orchestrator' | 'synthlab'>('orchestrator');
+
+  const handleBakeWaveformToEng = (wave: number[]) => {
+    audioEngine.customWaveform = wave;
+  };
  
   useEffect(() => {
     audioEngine.onTick((bar) => {
@@ -1170,74 +1176,107 @@ export default function App() {
 
         {/* Central Engine Workspace */}
         <section className="flex-1 flex flex-col gap-6 min-h-0 overflow-y-auto lg:overflow-hidden">
-          {/* Oscilloscope / Visualizer */}
-          <Visualizer analyser={audioEngine.analyser} />
-
-          {/* Sequencer Section */}
-          <div className="glass-panel rounded-3xl p-6 flex flex-col gap-6 sm:gap-4 flex-shrink-0">
-            <div className="flex flex-col sm:flex-row justify-between items-center px-1 sm:px-2 gap-4">
-              <div className="flex gap-4 sm:gap-6">
-                <button 
-                  onClick={handlePlay}
-                  disabled={!hasSequence || isPlaying}
-                  className={`text-xs font-black uppercase flex items-center gap-2 ${isPlaying ? 'accent-cyan text-cyan-400' : 'text-slate-100 hover:text-cyan-400 transition-colors'} ${!hasSequence ? 'opacity-30' : ''}`}
-                >
-                  <Play size={14} className={isPlaying ? 'fill-cyan-400 text-cyan-400' : 'fill-slate-100'} /> Play
-                </button>
-                <button 
-                  onClick={handleStop}
-                  disabled={!isPlaying}
-                  className={`text-xs font-black uppercase flex items-center gap-2 ${isPlaying ? 'text-slate-100 hover:text-pink-400 transition-colors' : 'text-white/40'}`}
-                >
-                  <Square size={14} className={isPlaying ? 'fill-slate-100' : 'fill-transparent'} /> Stop
-                </button>
-              </div>
-              <div className="flex items-center justify-center sm:justify-end">
-                {dubstepMode ? (
-                  <button 
-                    onClick={handleGenLoop}
-                    className="px-6 py-2.5 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5 whitespace-nowrap bg-amber-500/25 text-amber-300 border border-amber-500/40 shadow-[0_0_15px_rgba(245,158,11,0.35)] animate-pulse hover:bg-amber-500/35 hover:scale-[1.02] active:scale-100 transition-all"
-                    title="Generate a brand new hard-hitting Nuclear Dubstep loop pattern!"
-                  >
-                    <span>☢️ GENERATE DUBSTEP DROP</span>
-                  </button>
-                ) : (
-                  <button 
-                    onClick={handleGenLoop}
-                    className="neo-button px-6 py-2.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-white/5 flex items-center justify-center whitespace-nowrap hover:bg-white/10 hover:scale-[1.02] active:scale-100 transition-all"
-                    title="Generate a brand new peaceful chord progression and rhythm pattern!"
-                  >
-                    Generate New Pattern
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="w-full overflow-x-auto pb-2 -mx-2 px-2 sm:overflow-visible sm:pb-0 sm:mx-0 sm:px-0">
-              <div className="min-w-[500px] sm:min-w-0">
-                <Sequencer 
-                  currentBar={currentBar} 
-                  isPlaying={isPlaying} 
-                  bassPatterns={bassPatterns} 
-                />
-              </div>
-            </div>
-
-            <div className="flex justify-center gap-4 sm:gap-8 mt-2 flex-wrap">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full" style={{background: '#00f2ff'}}></div>
-                <span className="text-[9px] uppercase font-bold text-white/40">Deep Sub/Bass</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full" style={{background: '#ff00e5'}}></div>
-                <span className="text-[9px] uppercase font-bold text-white/40">Aggressive Drums</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full" style={{background: '#fbff00'}}></div>
-                <span className="text-[9px] uppercase font-bold text-white/40">Noise Build-up</span>
-              </div>
-            </div>
+          {/* Workspace Toggles - Loop Orchestrator vs Patch Lab */}
+          <div className="flex items-center justify-between p-1 bg-black/45 rounded-2xl border border-white/[0.04] shrink-0">
+            <button
+              onClick={() => setWorkspace('orchestrator')}
+              className={`flex-1 py-3 px-4 rounded-xl text-center text-[10px] sm:text-xs font-black uppercase tracking-widest transition-all cursor-pointer ${
+                workspace === 'orchestrator'
+                  ? 'bg-gradient-to-r from-cyan-500/15 to-cyan-500/10 text-cyan-300 border border-cyan-500/20 shadow-[0_0_15px_rgba(6,182,212,0.15)] font-bold'
+                  : 'text-white/40 hover:text-white/85'
+              }`}
+            >
+              🧬 Loop Orchestrator
+            </button>
+            <button
+              onClick={() => setWorkspace('synthlab')}
+              className={`flex-1 py-3 px-4 rounded-xl text-center text-[10px] sm:text-xs font-black uppercase tracking-widest transition-all cursor-pointer ${
+                workspace === 'synthlab'
+                  ? 'bg-gradient-to-r from-pink-500/15 to-pink-500/10 text-pink-300 border border-pink-500/20 shadow-[0_0_15px_rgba(236,72,153,0.15)] font-bold'
+                  : 'text-white/40 hover:text-white/85'
+              }`}
+            >
+              🌌 Patch & Wave Lab
+            </button>
           </div>
+
+          {workspace === 'orchestrator' ? (
+            <>
+              {/* Oscilloscope / Visualizer */}
+              <Visualizer analyser={audioEngine.analyser} />
+
+              {/* Sequencer Section */}
+              <div className="glass-panel rounded-3xl p-6 flex flex-col gap-6 sm:gap-4 flex-shrink-0">
+                <div className="flex flex-col sm:flex-row justify-between items-center px-1 sm:px-2 gap-4">
+                  <div className="flex gap-4 sm:gap-6">
+                    <button 
+                      onClick={handlePlay}
+                      disabled={!hasSequence || isPlaying}
+                      className={`text-xs font-black uppercase flex items-center gap-2 ${isPlaying ? 'accent-cyan text-cyan-400' : 'text-slate-100 hover:text-cyan-400 transition-colors'} ${!hasSequence ? 'opacity-30' : ''}`}
+                    >
+                      <Play size={14} className={isPlaying ? 'fill-cyan-400 text-cyan-400' : 'fill-slate-100'} /> Play
+                    </button>
+                    <button 
+                      onClick={handleStop}
+                      disabled={!isPlaying}
+                      className={`text-xs font-black uppercase flex items-center gap-2 ${isPlaying ? 'text-slate-100 hover:text-pink-400 transition-colors' : 'text-white/40'}`}
+                    >
+                      <Square size={14} className={isPlaying ? 'fill-slate-100' : 'fill-transparent'} /> Stop
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-center sm:justify-end">
+                    {dubstepMode ? (
+                      <button 
+                        onClick={handleGenLoop}
+                        className="px-6 py-2.5 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5 whitespace-nowrap bg-amber-500/25 text-amber-300 border border-amber-500/40 shadow-[0_0_15px_rgba(245,158,11,0.35)] animate-pulse hover:bg-amber-500/35 hover:scale-[1.02] active:scale-100 transition-all"
+                        title="Generate a brand new hard-hitting Nuclear Dubstep loop pattern!"
+                      >
+                        <span>☢️ GENERATE DUBSTEP DROP</span>
+                      </button>
+                    ) : (
+                      <button 
+                        onClick={handleGenLoop}
+                        className="neo-button px-6 py-2.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-white/5 flex items-center justify-center whitespace-nowrap hover:bg-white/10 hover:scale-[1.02] active:scale-100 transition-all"
+                        title="Generate a brand new peaceful chord progression and rhythm pattern!"
+                      >
+                        Generate New Pattern
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="w-full overflow-x-auto pb-2 -mx-2 px-2 sm:overflow-visible sm:pb-0 sm:mx-0 sm:px-0">
+                  <div className="min-w-[500px] sm:min-w-0">
+                    <Sequencer 
+                      currentBar={currentBar} 
+                      isPlaying={isPlaying} 
+                      bassPatterns={bassPatterns} 
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-center gap-4 sm:gap-8 mt-2 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full" style={{background: '#00f2ff'}}></div>
+                    <span className="text-[9px] uppercase font-bold text-white/40">Deep Sub/Bass</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full" style={{background: '#ff00e5'}}></div>
+                    <span className="text-[9px] uppercase font-bold text-white/40">Aggressive Drums</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full" style={{background: '#fbff00'}}></div>
+                    <span className="text-[9px] uppercase font-bold text-white/40">Noise Build-up</span>
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <PatchLab 
+              onBakeWaveformToEng={handleBakeWaveformToEng} 
+              audioCtx={audioEngine.audioCtx} 
+            />
+          )}
         </section>
       </main>
 

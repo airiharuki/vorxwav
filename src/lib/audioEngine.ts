@@ -130,6 +130,7 @@ export class DubstepEngine {
   public unisonWidth = 0.6; // Stereo width spread (0 to 1) for Vital wide unison
   public currentKey = 'C'; // Selected musical root key
   public currentScaleType = 'minor'; // Selected musical scale type (minor, major, phrygian, dorian, lharmonic)
+  public customWaveform: number[] | null = null; // Custom sketched waveform from laboratory
 
   // Custom Chord Drift & Mutation controls
   public chordDriftEnabled = false;
@@ -485,12 +486,30 @@ export class DubstepEngine {
     const midType = p.style === 'reese' ? 'sawtooth' : (p.style === 'growl' ? 'square' : 'sawtooth');
 
     const midL = this.audioCtx.createOscillator();
-    midL.type = midType; 
+    const midR = this.audioCtx.createOscillator();
+
+    if (this.customWaveform && this.customWaveform.length > 0) {
+      try {
+        const real = new Float32Array(this.customWaveform.length + 1);
+        const imag = new Float32Array(this.customWaveform.length + 1);
+        for (let i = 0; i < this.customWaveform.length; i++) {
+          real[i + 1] = this.customWaveform[i];
+        }
+        const pWave = this.audioCtx.createPeriodicWave(real, imag);
+        midL.setPeriodicWave(pWave);
+        midR.setPeriodicWave(pWave);
+      } catch (err) {
+        midL.type = midType;
+        midR.type = midType;
+      }
+    } else {
+      midL.type = midType;
+      midR.type = midType;
+    }
+
     midL.frequency.value = midFreq; 
     midL.detune.value = (p.dt * 1.2) - (25 * this.unisonWidth);
-
-    const midR = this.audioCtx.createOscillator();
-    midR.type = midType; 
+ 
     midR.frequency.value = midFreq; 
     midR.detune.value = (p.dt * 1.2) + (25 * this.unisonWidth);
     
