@@ -1,7 +1,9 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Upload, Download, Sparkles, Music, Play, Layers, HelpCircle, FileText, CheckCircle, Sliders, AlertTriangle } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { Upload, Download, Sparkles, Music, Play, Layers, HelpCircle, FileText, CheckCircle, Sliders, AlertTriangle, ChevronDown, ChevronUp, Power } from 'lucide-react';
 import { WaveSketcher } from './WaveSketcher';
 import { WavetableVisualizer } from './WavetableVisualizer';
+import { CompressorGraph, DistortionGraph, EqGraph } from './FXGraphs';
 
 interface PatchLabProps {
   onBakeWaveformToEng: (values: number[]) => void;
@@ -37,6 +39,7 @@ interface VitalPreset {
   // Added Premium DSP Vital-style FX parameters
   fx_distortion_drive: number;
   fx_distortion_mix: number;
+  fx_distortion_type: string; // added type for visual folding
   fx_delay_time: number;
   fx_delay_feedback: number;
   fx_delay_mix: number;
@@ -82,6 +85,7 @@ const DEFAULT_PATCH: VitalPreset = {
   // Mild studio presets
   fx_distortion_drive: 0.15,
   fx_distortion_mix: 0.10,
+  fx_distortion_type: 'soft',
   fx_delay_time: 0.35,
   fx_delay_feedback: 0.40,
   fx_delay_mix: 0.15,
@@ -129,6 +133,7 @@ const CURATED_PRESETS: { [key: string]: VitalPreset } = {
     // Huge spatial distortion and bright compression for lead presence!
     fx_distortion_drive: 0.45,
     fx_distortion_mix: 0.35,
+    fx_distortion_type: 'hard',
     fx_delay_time: 0.40,
     fx_delay_feedback: 0.50,
     fx_delay_mix: 0.25,
@@ -173,6 +178,7 @@ const CURATED_PRESETS: { [key: string]: VitalPreset } = {
     // Deep warm bitcrush overdrive and punchy EQ bass boost!
     fx_distortion_drive: 0.60,
     fx_distortion_mix: 0.50,
+    fx_distortion_type: 'soft',
     fx_delay_time: 0.35,
     fx_delay_feedback: 0.30,
     fx_delay_mix: 0.10,
@@ -217,6 +223,7 @@ const CURATED_PRESETS: { [key: string]: VitalPreset } = {
     // Ethereal massive spaces, spatial delay lines, and lush chorus spread!
     fx_distortion_drive: 0.05,
     fx_distortion_mix: 0.00,
+    fx_distortion_type: 'soft',
     fx_delay_time: 0.60,
     fx_delay_feedback: 0.60,
     fx_delay_mix: 0.40,
@@ -241,7 +248,12 @@ export function PatchLab({ onBakeWaveformToEng, audioCtx, audioEngine, usePatchI
   const [patch, setPatch] = useState<VitalPreset>({ ...DEFAULT_PATCH });
   const [dragActive, setDragActive] = useState(false);
   const [selectedOsc, setSelectedOsc] = useState<'osc1' | 'osc2' | 'osc3'>('osc1');
+  const [expandedFx, setExpandedFx] = useState<string[]>(['distortion', 'compressor']);
   const [activeTab, setActiveTab] = useState<'builder' | 'sketcher' | 'importer'>('builder');
+
+  const toggleFxExpand = (key: string) => {
+    setExpandedFx(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
+  };
 
   // Hybrid Synth Adapter central configurations
   const [targetSynth, setTargetSynth] = useState<'vital' | 'serum2'>('vital');
@@ -336,6 +348,7 @@ export function PatchLab({ onBakeWaveformToEng, audioCtx, audioEngine, usePatchI
         // Parse effects fields or fallback to clean defaults
         fx_distortion_drive: typeof s.fx_distortion_drive === 'number' ? s.fx_distortion_drive : 0.05,
         fx_distortion_mix: typeof s.fx_distortion_mix === 'number' ? s.fx_distortion_mix : 0.0,
+        fx_distortion_type: 'soft',
         fx_delay_time: typeof s.fx_delay_time === 'number' ? s.fx_delay_time : 0.35,
         fx_delay_feedback: typeof s.fx_delay_feedback === 'number' ? s.fx_delay_feedback : 0.4,
         fx_delay_mix: typeof s.fx_delay_mix === 'number' ? s.fx_delay_mix : 0.0,
@@ -518,6 +531,7 @@ export function PatchLab({ onBakeWaveformToEng, audioCtx, audioEngine, usePatchI
   // Keep the audio engine's copy of the laboratory patch fully synchronized in real-time
   useEffect(() => {
     if (audioEngine) {
+      audioEngine.fxOrder = fxOrder;
       audioEngine.labPatch = {
         osc_1_voices: patch.osc_1_voices,
         osc_1_detune: patch.osc_1_detune,
@@ -556,7 +570,7 @@ export function PatchLab({ onBakeWaveformToEng, audioCtx, audioEngine, usePatchI
         fx_compressor_mix: patch.fx_compressor_mix
       };
     }
-  }, [patch, audioEngine]);
+  }, [patch, fxOrder, audioEngine]);
 
   useEffect(() => {
     if (audioEngine && osc1Waveform.length > 0) {
@@ -717,288 +731,284 @@ export function PatchLab({ onBakeWaveformToEng, audioCtx, audioEngine, usePatchI
     mainGainNode.gain.setValueAtTime(0.75, now + 0.6);
     mainGainNode.gain.exponentialRampToValueAtTime(0.001, now + 1.25); // decay-release
 
-    // Now, route mainGainNode through the premium modular Vital FX chain!
+    // Now, route mainGainNode through the premium modular Vital FX chain respecting dynamic user order!
     let lastNode: AudioNode = mainGainNode;
 
-    // A. DISTORTION EFFECT
-    if (patch.fx_distortion_mix > 0 && patch.fx_distortion_drive > 0) {
-      try {
-        const shaper = activeCtx.createWaveShaper();
-        const drive = patch.fx_distortion_drive;
-        const mix = patch.fx_distortion_mix;
+    fxOrder.forEach((fxKey) => {
+      if (fxKey === 'distortion' && patch.fx_distortion_mix > 0 && patch.fx_distortion_drive > 0) {
+        try {
+          const shaper = activeCtx.createWaveShaper();
+          const drive = patch.fx_distortion_drive;
+          const mix = patch.fx_distortion_mix;
 
-        const k = drive * 100 + 1;
-        const n_samples = 22050; // light computation
-        const curve = new Float32Array(n_samples);
-        const deg = Math.PI / 180;
-        for (let i = 0; i < n_samples; ++i) {
-          const x = (i * 2) / n_samples - 1;
-          curve[i] = ((3 + k) * x * 20 * deg) / (Math.PI + k * Math.abs(x));
+          const k = drive * 100 + 1;
+          const n_samples = 22050; 
+          const curve = new Float32Array(n_samples);
+          const deg = Math.PI / 180;
+          for (let i = 0; i < n_samples; ++i) {
+            const x = (i * 2) / n_samples - 1;
+            curve[i] = ((3 + k) * x * 20 * deg) / (Math.PI + k * Math.abs(x));
+          }
+          shaper.curve = curve;
+          shaper.oversample = '4x';
+
+          const dryGain = activeCtx.createGain();
+          const wetGain = activeCtx.createGain();
+          dryGain.gain.setValueAtTime(1 - mix, now);
+          wetGain.gain.setValueAtTime(mix, now);
+
+          const distSplitter = activeCtx.createGain();
+          const distMerger = activeCtx.createGain();
+
+          lastNode.connect(distSplitter);
+          distSplitter.connect(dryGain).connect(distMerger);
+          distSplitter.connect(shaper).connect(wetGain).connect(distMerger);
+
+          lastNode = distMerger;
+        } catch (err) {
+          console.warn("Distortion node setup failed", err);
         }
-        shaper.curve = curve;
-        shaper.oversample = '4x';
-
-        const dryGain = activeCtx.createGain();
-        const wetGain = activeCtx.createGain();
-        dryGain.gain.setValueAtTime(1 - mix, now);
-        wetGain.gain.setValueAtTime(mix, now);
-
-        const distSplitter = activeCtx.createGain();
-        const distMerger = activeCtx.createGain();
-
-        lastNode.connect(distSplitter);
-        distSplitter.connect(dryGain).connect(distMerger);
-        distSplitter.connect(shaper).connect(wetGain).connect(distMerger);
-
-        lastNode = distMerger;
-      } catch (err) {
-        console.warn("Distortion node setup failed", err);
       }
-    }
 
-    // B. EQUALIZER (EQ) EFFECT
-    try {
-      const lowShelf = activeCtx.createBiquadFilter();
-      lowShelf.type = 'lowshelf';
-      lowShelf.frequency.value = 220;
-      lowShelf.gain.setValueAtTime((patch.fx_eq_low - 0.5) * 24, now); // -12dB to +12dB
+      if (fxKey === 'eq') {
+        try {
+          const lowShelf = activeCtx.createBiquadFilter();
+          lowShelf.type = 'lowshelf';
+          lowShelf.frequency.value = 220;
+          lowShelf.gain.setValueAtTime((patch.fx_eq_low - 0.5) * 24, now); 
 
-      const midBell = activeCtx.createBiquadFilter();
-      midBell.type = 'peaking';
-      midBell.frequency.value = 1000;
-      midBell.Q.value = 1.0;
-      midBell.gain.setValueAtTime((patch.fx_eq_mid - 0.5) * 24, now);
+          const midBell = activeCtx.createBiquadFilter();
+          midBell.type = 'peaking';
+          midBell.frequency.value = 1000;
+          midBell.Q.value = 1.0;
+          midBell.gain.setValueAtTime((patch.fx_eq_mid - 0.5) * 24, now);
 
-      const highShelf = activeCtx.createBiquadFilter();
-      highShelf.type = 'highshelf';
-      highShelf.frequency.value = 4500;
-      highShelf.gain.setValueAtTime((patch.fx_eq_high - 0.5) * 24, now);
+          const highShelf = activeCtx.createBiquadFilter();
+          highShelf.type = 'highshelf';
+          highShelf.frequency.value = 4500;
+          highShelf.gain.setValueAtTime((patch.fx_eq_high - 0.5) * 24, now);
 
-      lastNode.connect(lowShelf);
-      lowShelf.connect(midBell);
-      midBell.connect(highShelf);
-      lastNode = highShelf;
-    } catch (err) {
-      console.warn("EQ node setup failed", err);
-    }
-
-    // C. CHORUS EFFECT
-    if (patch.fx_chorus_mix > 0) {
-      try {
-        const mix = patch.fx_chorus_mix;
-        const rate = patch.fx_chorus_rate;
-
-        const chorusSplitter = activeCtx.createGain();
-        const dryGain = activeCtx.createGain();
-        const wetGain = activeCtx.createGain();
-        const chorusMerger = activeCtx.createGain();
-
-        dryGain.gain.setValueAtTime(1 - mix, now);
-        wetGain.gain.setValueAtTime(mix, now);
-
-        lastNode.connect(chorusSplitter);
-        chorusSplitter.connect(dryGain).connect(chorusMerger);
-
-        const delayL = activeCtx.createDelay(0.1);
-        const delayR = activeCtx.createDelay(0.1);
-        delayL.delayTime.setValueAtTime(0.015, now);
-        delayR.delayTime.setValueAtTime(0.024, now);
-
-        const chorusLfo = activeCtx.createOscillator();
-        chorusLfo.frequency.setValueAtTime(0.25 + rate * 3.75, now); // 0.25 - 4Hz
-
-        const lfoGainL = activeCtx.createGain();
-        lfoGainL.gain.setValueAtTime(0.003, now);
-
-        const lfoGainR = activeCtx.createGain();
-        lfoGainR.gain.setValueAtTime(-0.003, now); // out of phase for massive stereo chorus
-
-        chorusLfo.connect(lfoGainL).connect(delayL.delayTime);
-        chorusLfo.connect(lfoGainR).connect(delayR.delayTime);
-        chorusLfo.start(now);
-        chorusLfo.stop(now + 1.5);
-
-        const fbGain = activeCtx.createGain();
-        fbGain.gain.setValueAtTime(0.3, now);
-
-        chorusSplitter.connect(delayL).connect(wetGain);
-        chorusSplitter.connect(delayR).connect(wetGain);
-        
-        delayL.connect(fbGain).connect(delayL);
-        delayR.connect(fbGain).connect(delayR);
-
-        wetGain.connect(chorusMerger);
-        lastNode = chorusMerger;
-      } catch (err) {
-        console.warn("Chorus node setup failed", err);
+          lastNode.connect(lowShelf);
+          lowShelf.connect(midBell);
+          midBell.connect(highShelf);
+          lastNode = highShelf;
+        } catch (err) {
+          console.warn("EQ node setup failed", err);
+        }
       }
-    }
 
-    // D. PHASER EFFECT
-    if (patch.fx_phaser_mix > 0) {
-      try {
-        const mix = patch.fx_phaser_mix;
-        const depth = patch.fx_phaser_depth;
-        const rate = patch.fx_phaser_rate;
+      if (fxKey === 'chorus' && patch.fx_chorus_mix > 0) {
+        try {
+          const mix = patch.fx_chorus_mix;
+          const rate = patch.fx_chorus_rate;
 
-        const phaserSplitter = activeCtx.createGain();
-        const dryGain = activeCtx.createGain();
-        const wetGain = activeCtx.createGain();
-        const phaserMerger = activeCtx.createGain();
+          const chorusSplitter = activeCtx.createGain();
+          const dryGain = activeCtx.createGain();
+          const wetGain = activeCtx.createGain();
+          const chorusMerger = activeCtx.createGain();
 
-        dryGain.gain.setValueAtTime(1 - mix, now);
-        wetGain.gain.setValueAtTime(mix, now);
+          dryGain.gain.setValueAtTime(1 - mix, now);
+          wetGain.gain.setValueAtTime(mix, now);
 
-        lastNode.connect(phaserSplitter);
-        phaserSplitter.connect(dryGain).connect(phaserMerger);
+          lastNode.connect(chorusSplitter);
+          chorusSplitter.connect(dryGain).connect(chorusMerger);
 
-        const ap1 = activeCtx.createBiquadFilter();
-        ap1.type = 'allpass';
-        ap1.frequency.setValueAtTime(900, now);
+          const delayL = activeCtx.createDelay(0.1);
+          const delayR = activeCtx.createDelay(0.1);
+          delayL.delayTime.setValueAtTime(0.015, now);
+          delayR.delayTime.setValueAtTime(0.024, now);
 
-        const ap2 = activeCtx.createBiquadFilter();
-        ap2.type = 'allpass';
-        ap2.frequency.setValueAtTime(1500, now);
+          const chorusLfo = activeCtx.createOscillator();
+          chorusLfo.frequency.setValueAtTime(0.25 + rate * 3.75, now); 
 
-        const phaserLfo = activeCtx.createOscillator();
-        phaserLfo.frequency.setValueAtTime(0.1 + rate * 5.0, now); // 0.1Hz - 5.1Hz
+          const lfoGainL = activeCtx.createGain();
+          lfoGainL.gain.setValueAtTime(0.003, now);
 
-        const phaserLfoGain = activeCtx.createGain();
-        phaserLfoGain.gain.setValueAtTime(depth * 700, now);
+          const lfoGainR = activeCtx.createGain();
+          lfoGainR.gain.setValueAtTime(-0.003, now); 
 
-        phaserLfo.connect(phaserLfoGain).connect(ap1.frequency);
-        phaserLfo.connect(phaserLfoGain).connect(ap2.frequency);
-        phaserLfo.start(now);
-        phaserLfo.stop(now + 1.5);
+          chorusLfo.connect(lfoGainL).connect(delayL.delayTime);
+          chorusLfo.connect(lfoGainR).connect(delayR.delayTime);
+          chorusLfo.start(now);
+          chorusLfo.stop(now + 1.5);
 
-        phaserSplitter.connect(ap1).connect(ap2).connect(wetGain).connect(phaserMerger);
-        lastNode = phaserMerger;
-      } catch (err) {
-        console.warn("Phaser node setup failed", err);
-      }
-    }
-
-    // E. DELAY (Echo & Ping Pong feedback delay)
-    if (patch.fx_delay_mix > 0) {
-      try {
-        const mix = patch.fx_delay_mix;
-        const delayTime = 0.12 + patch.fx_delay_time * 0.88; // 120ms to 1s
-        const feedback = patch.fx_delay_feedback * 0.75; // safe feedback ratio
-
-        const delaySplitter = activeCtx.createGain();
-        const dryGain = activeCtx.createGain();
-        const wetGain = activeCtx.createGain();
-        const delayMerger = activeCtx.createGain();
-
-        dryGain.gain.setValueAtTime(1 - mix, now);
-        wetGain.gain.setValueAtTime(mix, now);
-
-        lastNode.connect(delaySplitter);
-        delaySplitter.connect(dryGain).connect(delayMerger);
-
-        const delayL = activeCtx.createDelay(1.5);
-        const delayR = activeCtx.createDelay(1.5);
-        delayL.delayTime.setValueAtTime(delayTime, now);
-        delayR.delayTime.setValueAtTime(delayTime * 1.5, now); // classic widening rhythm
-
-        const fbL = activeCtx.createGain();
-        const fbR = activeCtx.createGain();
-        fbL.gain.setValueAtTime(feedback, now);
-        fbR.gain.setValueAtTime(feedback, now);
-
-        const dampFilter = activeCtx.createBiquadFilter();
-        dampFilter.type = 'lowpass';
-        dampFilter.frequency.setValueAtTime(2500, now); // warm analog eco vibe
-
-        delaySplitter.connect(delayL);
-        delayL.connect(dampFilter).connect(fbL).connect(delayR);
-        delayR.connect(dampFilter).connect(fbR).connect(delayL);
-
-        delayL.connect(wetGain);
-        delayR.connect(wetGain);
-        wetGain.connect(delayMerger);
-
-        lastNode = delayMerger;
-      } catch (err) {
-        console.warn("Delay node setup failed", err);
-      }
-    }
-
-    // F. REVERB MODEL (Feedback Delay Network Schroeder reverberator)
-    if (patch.fx_reverb_mix > 0) {
-      try {
-        const mix = patch.fx_reverb_mix;
-        const size = patch.fx_reverb_size;
-        const decay = patch.fx_reverb_decay;
-
-        const revSplitter = activeCtx.createGain();
-        const dryGain = activeCtx.createGain();
-        const wetGain = activeCtx.createGain();
-        const revMerger = activeCtx.createGain();
-
-        dryGain.gain.setValueAtTime(1 - mix, now);
-        wetGain.gain.setValueAtTime(mix, now);
-
-        lastNode.connect(revSplitter);
-        revSplitter.connect(dryGain).connect(revMerger);
-
-        // Schroeder parallel comb delay lines
-        const delayTimes = [0.029, 0.041, 0.053, 0.067];
-        const combFilters = delayTimes.map(tVal => {
-          const delayNode = activeCtx.createDelay(0.3);
-          delayNode.delayTime.setValueAtTime(tVal * (0.4 + size * 1.6), now);
-          
           const fbGain = activeCtx.createGain();
-          fbGain.gain.setValueAtTime(0.70 * decay, now);
+          fbGain.gain.setValueAtTime(0.3, now);
 
-          const lpNode = activeCtx.createBiquadFilter();
-          lpNode.type = 'lowpass';
-          lpNode.frequency.setValueAtTime(2200, now); // Cathedral damping
+          chorusSplitter.connect(delayL).connect(wetGain);
+          chorusSplitter.connect(delayR).connect(wetGain);
+          
+          delayL.connect(fbGain).connect(delayL);
+          delayR.connect(fbGain).connect(delayR);
 
-          revSplitter.connect(delayNode);
-          delayNode.connect(lpNode).connect(fbGain).connect(delayNode);
-          lpNode.connect(wetGain);
-          return delayNode;
-        });
-
-        wetGain.connect(revMerger);
-        lastNode = revMerger;
-      } catch (err) {
-        console.warn("Reverb node setup failed", err);
+          wetGain.connect(chorusMerger);
+          lastNode = chorusMerger;
+        } catch (err) {
+          console.warn("Chorus node setup failed", err);
+        }
       }
-    }
 
-    // G. COMPRESSOR & PEAK LIMITER (Vital final mastering node)
-    if (patch.fx_compressor_mix > 0) {
-      try {
-        const mix = patch.fx_compressor_mix;
-        const threshold = -35 * patch.fx_compressor_threshold;
-        const ratio = 1 + patch.fx_compressor_ratio * 15;
+      if (fxKey === 'phaser' && patch.fx_phaser_mix > 0) {
+        try {
+          const mix = patch.fx_phaser_mix;
+          const depth = patch.fx_phaser_depth;
+          const rate = patch.fx_phaser_rate;
 
-        const compSplitter = activeCtx.createGain();
-        const dryGain = activeCtx.createGain();
-        const wetGain = activeCtx.createGain();
-        const compMerger = activeCtx.createGain();
+          const phaserSplitter = activeCtx.createGain();
+          const dryGain = activeCtx.createGain();
+          const wetGain = activeCtx.createGain();
+          const phaserMerger = activeCtx.createGain();
 
-        dryGain.gain.setValueAtTime(1 - mix, now);
-        wetGain.gain.setValueAtTime(mix, now);
+          dryGain.gain.setValueAtTime(1 - mix, now);
+          wetGain.gain.setValueAtTime(mix, now);
 
-        lastNode.connect(compSplitter);
-        compSplitter.connect(dryGain).connect(compMerger);
+          lastNode.connect(phaserSplitter);
+          phaserSplitter.connect(dryGain).connect(phaserMerger);
 
-        const compressorNode = activeCtx.createDynamicsCompressor();
-        compressorNode.threshold.setValueAtTime(threshold, now);
-        compressorNode.knee.setValueAtTime(8, now);
-        compressorNode.ratio.setValueAtTime(ratio, now);
-        compressorNode.attack.setValueAtTime(0.004, now); // snappy OTT attack
-        compressorNode.release.setValueAtTime(0.06, now);
+          const ap1 = activeCtx.createBiquadFilter();
+          ap1.type = 'allpass';
+          ap1.frequency.setValueAtTime(900, now);
 
-        compSplitter.connect(compressorNode).connect(wetGain).connect(compMerger);
-        lastNode = compMerger;
-      } catch (err) {
-        console.warn("Compressor node setup failed", err);
+          const ap2 = activeCtx.createBiquadFilter();
+          ap2.type = 'allpass';
+          ap2.frequency.setValueAtTime(1500, now);
+
+          const phaserLfo = activeCtx.createOscillator();
+          phaserLfo.frequency.setValueAtTime(0.1 + rate * 5.0, now);
+
+          const phaserLfoGain = activeCtx.createGain();
+          phaserLfoGain.gain.setValueAtTime(depth * 700, now);
+
+          phaserLfo.connect(phaserLfoGain).connect(ap1.frequency);
+          phaserLfo.connect(phaserLfoGain).connect(ap2.frequency);
+          phaserLfo.start(now);
+          phaserLfo.stop(now + 1.5);
+
+          phaserSplitter.connect(ap1).connect(ap2).connect(wetGain).connect(phaserMerger);
+          lastNode = phaserMerger;
+        } catch (err) {
+          console.warn("Phaser node setup failed", err);
+        }
       }
-    }
+
+      if (fxKey === 'delay' && patch.fx_delay_mix > 0) {
+        try {
+          const mix = patch.fx_delay_mix;
+          const delayTime = 0.12 + patch.fx_delay_time * 0.88; 
+          const feedback = patch.fx_delay_feedback * 0.75; 
+
+          const delaySplitter = activeCtx.createGain();
+          const dryGain = activeCtx.createGain();
+          const wetGain = activeCtx.createGain();
+          const delayMerger = activeCtx.createGain();
+
+          dryGain.gain.setValueAtTime(1 - mix, now);
+          wetGain.gain.setValueAtTime(mix, now);
+
+          lastNode.connect(delaySplitter);
+          delaySplitter.connect(dryGain).connect(delayMerger);
+
+          const delayL = activeCtx.createDelay(1.5);
+          const delayR = activeCtx.createDelay(1.5);
+          delayL.delayTime.setValueAtTime(delayTime, now);
+          delayR.delayTime.setValueAtTime(delayTime * 1.5, now); 
+
+          const fbL = activeCtx.createGain();
+          const fbR = activeCtx.createGain();
+          fbL.gain.setValueAtTime(feedback, now);
+          fbR.gain.setValueAtTime(feedback, now);
+
+          const dampFilter = activeCtx.createBiquadFilter();
+          dampFilter.type = 'lowpass';
+          dampFilter.frequency.setValueAtTime(2500, now); 
+
+          delaySplitter.connect(delayL);
+          delayL.connect(dampFilter).connect(fbL).connect(delayR);
+          delayR.connect(dampFilter).connect(fbR).connect(delayL);
+
+          delayL.connect(wetGain);
+          delayR.connect(wetGain);
+          wetGain.connect(delayMerger);
+
+          lastNode = delayMerger;
+        } catch (err) {
+          console.warn("Delay node setup failed", err);
+        }
+      }
+
+      if (fxKey === 'reverb' && patch.fx_reverb_mix > 0) {
+        try {
+          const mix = patch.fx_reverb_mix;
+          const size = patch.fx_reverb_size;
+          const decay = patch.fx_reverb_decay;
+
+          const revSplitter = activeCtx.createGain();
+          const dryGain = activeCtx.createGain();
+          const wetGain = activeCtx.createGain();
+          const revMerger = activeCtx.createGain();
+
+          dryGain.gain.setValueAtTime(1 - mix, now);
+          wetGain.gain.setValueAtTime(mix, now);
+
+          lastNode.connect(revSplitter);
+          revSplitter.connect(dryGain).connect(revMerger);
+
+          const delayTimes = [0.029, 0.041, 0.053, 0.067];
+          const combFilters = delayTimes.map(tVal => {
+            const delayNode = activeCtx.createDelay(0.3);
+            delayNode.delayTime.setValueAtTime(tVal * (0.4 + size * 1.6), now);
+            
+            const fbGain = activeCtx.createGain();
+            fbGain.gain.setValueAtTime(0.70 * decay, now);
+
+            const lpNode = activeCtx.createBiquadFilter();
+            lpNode.type = 'lowpass';
+            lpNode.frequency.setValueAtTime(2200, now); 
+
+            revSplitter.connect(delayNode);
+            delayNode.connect(lpNode).connect(fbGain).connect(delayNode);
+            lpNode.connect(wetGain);
+            return delayNode;
+          });
+
+          wetGain.connect(revMerger);
+          lastNode = revMerger;
+        } catch (err) {
+          console.warn("Reverb node setup failed", err);
+        }
+      }
+
+      if (fxKey === 'compressor' && patch.fx_compressor_mix > 0) {
+        try {
+          const mix = patch.fx_compressor_mix;
+          const threshold = -35 * patch.fx_compressor_threshold;
+          const ratio = 1 + patch.fx_compressor_ratio * 15;
+
+          const compSplitter = activeCtx.createGain();
+          const dryGain = activeCtx.createGain();
+          const wetGain = activeCtx.createGain();
+          const compMerger = activeCtx.createGain();
+
+          dryGain.gain.setValueAtTime(1 - mix, now);
+          wetGain.gain.setValueAtTime(mix, now);
+
+          lastNode.connect(compSplitter);
+          compSplitter.connect(dryGain).connect(compMerger);
+
+          const compressorNode = activeCtx.createDynamicsCompressor();
+          compressorNode.threshold.setValueAtTime(threshold, now);
+          compressorNode.knee.setValueAtTime(8, now);
+          compressorNode.ratio.setValueAtTime(ratio, now);
+          compressorNode.attack.setValueAtTime(0.004, now); 
+          compressorNode.release.setValueAtTime(0.06, now);
+
+          compSplitter.connect(compressorNode).connect(wetGain).connect(compMerger);
+          lastNode = compMerger;
+        } catch (err) {
+          console.warn("Compressor node setup failed", err);
+        }
+      }
+    });
 
     // Connect FX chain output node cleanly to context destination! Since we added a limiter, let us protect the user's ears.
     try {
@@ -1135,6 +1145,7 @@ export function PatchLab({ onBakeWaveformToEng, audioCtx, audioEngine, usePatchI
           // Parse effects properties or use safedefaults
           fx_distortion_drive: typeof s.fx_distortion_drive === 'number' ? s.fx_distortion_drive : 0.05,
           fx_distortion_mix: typeof s.fx_distortion_mix === 'number' ? s.fx_distortion_mix : 0.0,
+          fx_distortion_type: 'soft',
           fx_delay_time: typeof s.fx_delay_time === 'number' ? s.fx_delay_time : 0.35,
           fx_delay_feedback: typeof s.fx_delay_feedback === 'number' ? s.fx_delay_feedback : 0.4,
           fx_delay_mix: typeof s.fx_delay_mix === 'number' ? s.fx_delay_mix : 0.0,
@@ -1468,15 +1479,11 @@ export function PatchLab({ onBakeWaveformToEng, audioCtx, audioEngine, usePatchI
                     <button
                       type="button"
                       onClick={() => {
-                        setRemotePresetUrl('https://litter.catbox.moe/mpmqixw63u0d7p8c.vital');
-                        // Small timeout to allow input value update
-                        setTimeout(() => {
-                          handleLoadPresetUrl();
-                        }, 50);
+                        window.open('https://presetshare.com/p21016', '_blank');
                       }}
-                      className="text-[6.5px] text-purple-400 hover:text-purple-300 underline font-mono cursor-pointer bg-transparent border-0 p-0"
+                      className="text-[6.5px] text-purple-400 hover:text-purple-300 underline font-mono cursor-pointer bg-transparent border-0 p-0 flex items-center gap-1"
                     >
-                      [LD - Absolute (Stacy's Catbox Link)]
+                      <Sparkles size={8} /> Original Vital Page
                     </button>
                   </div>
                 </div>
@@ -1561,7 +1568,7 @@ export function PatchLab({ onBakeWaveformToEng, audioCtx, audioEngine, usePatchI
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                   {/* Left block: Adapter Settings */}
                   <div className="flex flex-col gap-3">
                     <span className="text-[7.5px] font-sans font-black text-cyan-400 tracking-widest uppercase">⚙️ TRANSLATION ADAPTER CONTROLS:</span>
@@ -1922,442 +1929,353 @@ export function PatchLab({ onBakeWaveformToEng, audioCtx, audioEngine, usePatchI
                     className="w-full h-1 bg-zinc-700 rounded-lg appearance-none cursor-pointer" 
                   />
                 </div>
+              </div>
+            </div>
               {/* Vital Premium Studio FX Rack */}
-            <div id="vital-effects-rack" className="bg-zinc-950/40 border border-white/5 rounded-3xl p-5 flex flex-col gap-4 mt-1.5 col-span-2 shadow-2xl">
+            <div id="vital-effects-rack" className="bg-zinc-950/40 border border-white/5 rounded-3xl p-5 flex flex-col gap-4 mt-1.5 col-span-2 shadow-2xl relative">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-white/5 pb-3 gap-2">
                 <div className="flex flex-col">
                   <div className="flex items-center gap-2">
                     <span className="flex h-2 w-2 rounded-full bg-cyan-500 animate-pulse"></span>
-                    <span className="text-[10.5px] font-black uppercase tracking-wider text-slate-100">🎛️ HYBRID DSP PIPELINE FX CHAIN</span>
+                    <span className="text-[10.5px] font-black uppercase tracking-wider text-slate-100 italic">Premium DSP // Visual FX Chain</span>
                   </div>
-                  <span className="text-[7.5px] font-mono text-zinc-500 uppercase mt-0.5">Order of modules dynamically re-engineers active signal flow</span>
+                  <span className="text-[7.5px] font-mono text-zinc-500 uppercase mt-0.5">Click module headers to expand or toggle power</span>
                 </div>
                 {/* Glowing Active Process Signal Path banner */}
                 <div className="bg-black/40 text-[7px] text-zinc-300 font-mono px-3 py-1.5 rounded-xl border border-white/5 flex items-center gap-1 max-w-full overflow-x-auto whitespace-nowrap scrollbar-hide">
-                  <span className="text-zinc-650">PATH:</span>
-                  <span className="text-cyan-400">INPUT</span>
-                  <span>➜</span>
-                  <span className="text-pink-400">OSC</span>
+                  <span className="text-zinc-650">SIGNAL:</span>
+                  <span className="text-rose-400 font-bold">RAW</span>
                   <span>➜</span>
                   {fxOrder.map((f, i) => (
                     <React.Fragment key={f}>
-                      <span className="text-white bg-white/5 px-1 rounded font-bold">{f.toUpperCase()}</span>
+                      <span className={`px-1 rounded font-bold transition-all ${patch[`fx_${f}_mix` as keyof VitalPreset] > 0 ? 'text-cyan-400 bg-cyan-500/10' : 'text-zinc-600 bg-zinc-900'}`}>{f.toUpperCase()}</span>
                       <span>➜</span>
                     </React.Fragment>
                   ))}
-                  <span className="text-emerald-400 font-bold">LIMITER</span>
-                  <span>➜</span>
-                  <span className="text-cyan-400">OUTPUT</span>
+                  <span className="text-emerald-400 font-bold">OUT</span>
                 </div>
               </div>
 
               {/* Effects grid ordered dynamically by fxOrder state */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 {fxOrder.map((fxKey, idx) => {
-                  if (fxKey === 'distortion') {
-                    return (
-                      <div key="distortion" id="fx-distortion" className="bg-black/35 border border-white/5 rounded-2xl p-3.5 flex flex-col gap-3 hover:border-orange-500/20 transition-all">
-                        <div className="flex justify-between items-center pb-1.5 border-b border-white/5">
-                          <span className="text-[8.5px] uppercase font-black tracking-wide text-orange-400">🔥 DISTORTION OVERDRIVE</span>
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              disabled={idx === 0}
-                              onClick={() => moveFx(idx, 'left')}
-                              className="text-[9px] hover:text-orange-400 disabled:opacity-20 select-none pb-0.5 font-bold cursor-pointer"
-                              title="Move left in signal chain"
-                            >
-                              ◀
-                            </button>
-                            <button
-                              type="button"
-                              disabled={idx === fxOrder.length - 1}
-                              onClick={() => moveFx(idx, 'right')}
-                              className="text-[9px] hover:text-orange-400 disabled:opacity-20 select-none pb-0.5 font-bold cursor-pointer"
-                              title="Move right in signal chain"
-                            >
-                              ▶
-                            </button>
-                            <span className={`h-1.5 w-1.5 rounded-full ${patch.fx_distortion_mix > 0 ? 'bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.8)]' : 'bg-zinc-700'}`}></span>
+                  const isExpanded = expandedFx.includes(fxKey);
+                  const mixKey = `fx_${fxKey}_mix` as keyof VitalPreset;
+                  const isActive = (patch[mixKey] as number) > 0;
+
+                  const fxConfig: Record<string, { label: string, color: string, icon: string, short: string }> = {
+                    distortion: { label: 'Distortion', color: 'orange', icon: '🔥', short: 'DST' },
+                    chorus: { label: 'Chorus', color: 'teal', icon: '🌊', short: 'CHO' },
+                    phaser: { label: 'Phaser', color: 'indigo', icon: '🌀', short: 'PHS' },
+                    eq: { label: 'Equalizer', color: 'yellow', icon: '🎚️', short: 'EQ' },
+                    delay: { label: 'Delay', color: 'cyan', icon: '⏱️', short: 'DLY' },
+                    reverb: { label: 'Reverb', color: 'purple', icon: '🪐', short: 'RVB' },
+                    compressor: { label: 'Compressor', color: 'pink', icon: '📉', short: 'CMP' },
+                  };
+
+                  const cfg = fxConfig[fxKey] || { label: fxKey, color: 'zinc', icon: '⚙️', short: 'FX' };
+
+                  return (
+                    <motion.div 
+                      layout
+                      key={fxKey} 
+                      className={`flex flex-col transition-all duration-300 border rounded-2xl overflow-hidden group relative ${
+                        isActive 
+                          ? `bg-zinc-900/80 border-${cfg.color}-500/30 shadow-[0_8px_32px_rgba(0,0,0,0.6)] backdrop-blur-md` 
+                          : 'bg-black/40 border-white/5 opacity-60'
+                      }`}
+                    >
+                      {/* Serum 2 Style Glossy Header Overlay */}
+                      <div className={`absolute inset-x-0 top-0 h-8 bg-gradient-to-b from-white/[0.05] to-transparent pointer-events-none`} />
+                      
+                      <div className={`p-3.5 flex justify-between items-center cursor-pointer select-none transition-colors border-b ${
+                        isExpanded ? 'bg-white/[0.04] border-white/10' : 'border-transparent'
+                      }`}
+                      onClick={() => toggleFxExpand(fxKey)}>
+                        <div className="flex items-center gap-3">
+                          <button 
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const currentMix = patch[mixKey] as number;
+                              updatePatchField(mixKey, currentMix > 0 ? 0 : 0.5);
+                            }}
+                            className={`p-1.5 rounded-lg transition-all border shadow-inner ${
+                              isActive 
+                                ? `text-${cfg.color}-400 bg-${cfg.color}-500/10 border-${cfg.color}-500/40 shadow-${cfg.color}-500/20` 
+                                : 'text-zinc-700 bg-zinc-950 border-white/5'
+                            }`}
+                          >
+                            <Power size={11} />
+                          </button>
+                          <div className="flex flex-col">
+                            <span className={`text-[9px] uppercase font-black tracking-[0.2em] ${isActive ? `text-${cfg.color}-400` : 'text-zinc-600'}`}>
+                              {cfg.label}
+                            </span>
+                            <span className="text-[6px] font-mono text-zinc-500/60 font-medium">MOD_{cfg.short}_V2</span>
                           </div>
                         </div>
-                        <div className="flex flex-col gap-2">
-                          <div className="flex justify-between items-center text-[7.5px] font-bold text-slate-400 uppercase">
-                            <span>Drive Gain</span>
-                            <span className="text-orange-400 font-mono">{Math.round(patch.fx_distortion_drive * 100)}%</span>
-                          </div>
-                          <input 
-                            type="range" min="0" max="1" step="0.01"
-                            value={patch.fx_distortion_drive} 
-                            onChange={(e) => updatePatchField('fx_distortion_drive', parseFloat(e.target.value))}
-                            className="w-full h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-orange-500" 
-                          />
-
-                          <div className="flex justify-between items-center text-[7.5px] font-bold text-slate-400 uppercase">
-                            <span>Wet/Dry Mix</span>
-                            <span className="text-orange-400 font-mono">{Math.round(patch.fx_distortion_mix * 100)}%</span>
-                          </div>
-                          <input 
-                            type="range" min="0" max="1" step="0.01"
-                            value={patch.fx_distortion_mix} 
-                            onChange={(e) => updatePatchField('fx_distortion_mix', parseFloat(e.target.value))}
-                            className="w-full h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-orange-500" 
-                          />
+                        <div className="flex items-center gap-2">
+                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-black/40 px-1.5 py-0.5 rounded-md border border-white/5">
+                             <button
+                                type="button" disabled={idx === 0}
+                                onClick={(e) => { e.stopPropagation(); moveFx(idx, 'left'); }}
+                                className="text-[8px] text-zinc-500 hover:text-white transition-colors"
+                              >▲</button>
+                              <button
+                                type="button" disabled={idx === fxOrder.length - 1}
+                                onClick={(e) => { e.stopPropagation(); moveFx(idx, 'right'); }}
+                                className="text-[8px] text-zinc-500 hover:text-white transition-colors"
+                              >▼</button>
+                           </div>
+                           {isExpanded ? <ChevronUp size={12} className="text-zinc-500" /> : <ChevronDown size={12} className="text-zinc-500" />}
                         </div>
                       </div>
-                    );
-                  }
 
-                  if (fxKey === 'chorus') {
-                    return (
-                      <div key="chorus" id="fx-chorus" className="bg-black/35 border border-white/5 rounded-2xl p-3.5 flex flex-col gap-3 hover:border-teal-500/20 transition-all">
-                        <div className="flex justify-between items-center pb-1.5 border-b border-white/5">
-                          <span className="text-[8.5px] uppercase font-black tracking-wide text-teal-400">🌊 STEREO CHORUS FLUID</span>
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              disabled={idx === 0}
-                              onClick={() => moveFx(idx, 'left')}
-                              className="text-[9px] hover:text-teal-400 disabled:opacity-20 select-none pb-0.5 font-bold cursor-pointer"
-                              title="Move left in signal chain"
-                            >
-                              ◀
-                            </button>
-                            <button
-                              type="button"
-                              disabled={idx === fxOrder.length - 1}
-                              onClick={() => moveFx(idx, 'right')}
-                              className="text-[9px] hover:text-teal-400 disabled:opacity-20 select-none pb-0.5 font-bold cursor-pointer"
-                              title="Move right in signal chain"
-                            >
-                              ▶
-                            </button>
-                            <span className={`h-1.5 w-1.5 rounded-full ${patch.fx_chorus_mix > 0 ? 'bg-teal-500 shadow-[0_0_8px_rgba(20,184,166,0.8)]' : 'bg-zinc-700'}`}></span>
-                          </div>
-                        </div>
-                        <div className="flex flex-col gap-2">
-                          <div className="flex justify-between items-center text-[7.5px] font-bold text-slate-400 uppercase">
-                            <span>LFO Speed Rate</span>
-                            <span className="text-teal-400 font-mono">{(0.25 + patch.fx_chorus_rate * 3.75).toFixed(1)} Hz</span>
-                          </div>
-                          <input 
-                            type="range" min="0" max="1" step="0.01"
-                            value={patch.fx_chorus_rate} 
-                            onChange={(e) => updatePatchField('fx_chorus_rate', parseFloat(e.target.value))}
-                            className="w-full h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-teal-500" 
-                          />
+                      <AnimatePresence initial={false}>
+                        {isExpanded && (
+                          <motion.div 
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.2 }}
+                            className="p-3.5 flex flex-col gap-4 overflow-hidden"
+                          >
+                            {fxKey === 'distortion' && (
+                              <div className="flex flex-col gap-3">
+                                <DistortionGraph 
+                                  drive={patch.fx_distortion_drive} 
+                                  type={patch.fx_distortion_type} 
+                                  onChangeDrive={(v) => updatePatchField('fx_distortion_drive', v)} 
+                                />
+                                <div className="grid grid-cols-3 gap-1 p-1 bg-black/40 rounded-lg border border-white/5">
+                                  {['soft', 'hard', 'fold'].map(t => (
+                                    <button 
+                                      key={t}
+                                      onClick={() => updatePatchField('fx_distortion_type', t)}
+                                      className={`text-[6.5px] uppercase font-bold py-1 rounded transition-all ${
+                                        patch.fx_distortion_type === t ? 'bg-orange-500 text-black shadow-lg' : 'text-zinc-500 hover:text-white'
+                                      }`}
+                                    >
+                                      {t}
+                                    </button>
+                                  ))}
+                                </div>
+                                <div className="flex flex-col gap-1.5">
+                                  <div className="flex justify-between text-[7px] uppercase font-bold text-zinc-500">
+                                    <span>Mix Wet</span>
+                                    <span className="text-orange-400">{Math.round(patch.fx_distortion_mix * 100)}%</span>
+                                  </div>
+                                  <input 
+                                    type="range" min="0" max="1" step="0.01"
+                                    value={patch.fx_distortion_mix}
+                                    onChange={(e) => updatePatchField('fx_distortion_mix', parseFloat(e.target.value))}
+                                    className="w-full h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-orange-500"
+                                  />
+                                </div>
+                              </div>
+                            )}
 
-                          <div className="flex justify-between items-center text-[7.5px] font-bold text-slate-400 uppercase">
-                            <span>Wet/Dry Mix</span>
-                            <span className="text-teal-400 font-mono">{Math.round(patch.fx_chorus_mix * 100)}%</span>
-                          </div>
-                          <input 
-                            type="range" min="0" max="1" step="0.01"
-                            value={patch.fx_chorus_mix} 
-                            onChange={(e) => updatePatchField('fx_chorus_mix', parseFloat(e.target.value))}
-                            className="w-full h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-teal-500" 
-                          />
-                        </div>
-                      </div>
-                    );
-                  }
+                            {fxKey === 'compressor' && (
+                              <div className="flex flex-col gap-3">
+                                <CompressorGraph 
+                                  threshold={patch.fx_compressor_threshold}
+                                  ratio={patch.fx_compressor_ratio}
+                                  onChange={(t, r) => {
+                                    updatePatchField('fx_compressor_threshold', t);
+                                    updatePatchField('fx_compressor_ratio', r);
+                                  }}
+                                />
+                                <div className="flex flex-col gap-3">
+                                  <div className="flex flex-col gap-1.5">
+                                    <div className="flex justify-between text-[7px] uppercase font-bold text-zinc-500">
+                                      <span>Ratio</span>
+                                      <span className="text-pink-400">{(1 + patch.fx_compressor_ratio * 19).toFixed(1)}:1</span>
+                                    </div>
+                                    <input 
+                                      type="range" min="0" max="1" step="0.01"
+                                      value={patch.fx_compressor_ratio}
+                                      onChange={(e) => updatePatchField('fx_compressor_ratio', parseFloat(e.target.value))}
+                                      className="w-full h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-pink-500"
+                                    />
+                                  </div>
+                                  <div className="flex flex-col gap-1.5">
+                                    <div className="flex justify-between text-[7px] uppercase font-bold text-zinc-500">
+                                      <span>Mix</span>
+                                      <span className="text-pink-400">{Math.round(patch.fx_compressor_mix * 100)}%</span>
+                                    </div>
+                                    <input 
+                                      type="range" min="0" max="1" step="0.01"
+                                      value={patch.fx_compressor_mix}
+                                      onChange={(e) => updatePatchField('fx_compressor_mix', parseFloat(e.target.value))}
+                                      className="w-full h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-pink-500"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            )}
 
-                  if (fxKey === 'phaser') {
-                    return (
-                      <div key="phaser" id="fx-phaser" className="bg-black/35 border border-white/5 rounded-2xl p-3.5 flex flex-col gap-3 hover:border-indigo-500/20 transition-all">
-                        <div className="flex justify-between items-center pb-1.5 border-b border-white/5">
-                          <span className="text-[8.5px] uppercase font-black tracking-wide text-indigo-400">🌀 ALLPASS PHASER SWEEP</span>
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              disabled={idx === 0}
-                              onClick={() => moveFx(idx, 'left')}
-                              className="text-[9px] hover:text-indigo-400 disabled:opacity-20 select-none pb-0.5 font-bold cursor-pointer"
-                              title="Move left in signal chain"
-                            >
-                              ◀
-                            </button>
-                            <button
-                              type="button"
-                              disabled={idx === fxOrder.length - 1}
-                              onClick={() => moveFx(idx, 'right')}
-                              className="text-[9px] hover:text-indigo-400 disabled:opacity-20 select-none pb-0.5 font-bold cursor-pointer"
-                              title="Move right in signal chain"
-                            >
-                              ▶
-                            </button>
-                            <span className={`h-1.5 w-1.5 rounded-full ${patch.fx_phaser_mix > 0 ? 'bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.8)]' : 'bg-zinc-700'}`}></span>
-                          </div>
-                        </div>
-                        <div className="flex flex-col gap-2">
-                          <div className="flex justify-between items-center text-[7.5px] font-bold text-slate-400 uppercase">
-                            <span>Sweep Speed</span>
-                            <span className="text-indigo-400 font-mono">{(0.1 + patch.fx_phaser_rate * 5).toFixed(1)} Hz</span>
-                          </div>
-                          <input 
-                            type="range" min="0" max="1" step="0.01"
-                            value={patch.fx_phaser_rate} 
-                            onChange={(e) => updatePatchField('fx_phaser_rate', parseFloat(e.target.value))}
-                            className="w-full h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-indigo-500" 
-                          />
+                            {fxKey === 'chorus' && (
+                              <div className="flex flex-col gap-3">
+                                <div className="flex flex-col gap-1.5">
+                                  <div className="flex justify-between text-[7px] uppercase font-bold text-zinc-500">
+                                    <span>Rate</span>
+                                    <span className="text-teal-400">{(0.25 + patch.fx_chorus_rate * 3.75).toFixed(1)} Hz</span>
+                                  </div>
+                                  <input 
+                                    type="range" min="0" max="1" step="0.01"
+                                    value={patch.fx_chorus_rate}
+                                    onChange={(e) => updatePatchField('fx_chorus_rate', parseFloat(e.target.value))}
+                                    className="w-full h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-teal-500"
+                                  />
+                                </div>
+                                <div className="flex flex-col gap-1.5">
+                                  <div className="flex justify-between text-[7px] uppercase font-bold text-zinc-500">
+                                    <span>Mix</span>
+                                    <span className="text-teal-400">{Math.round(patch.fx_chorus_mix * 100)}%</span>
+                                  </div>
+                                  <input 
+                                    type="range" min="0" max="1" step="0.01"
+                                    value={patch.fx_chorus_mix}
+                                    onChange={(e) => updatePatchField('fx_chorus_mix', parseFloat(e.target.value))}
+                                    className="w-full h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-teal-500"
+                                  />
+                                </div>
+                              </div>
+                            )}
 
-                          <div className="flex justify-between items-center text-[7.5px] font-bold text-slate-400 uppercase">
-                            <span>Phaser Wet Mix</span>
-                            <span className="text-indigo-400 font-mono">{Math.round(patch.fx_phaser_mix * 100)}%</span>
-                          </div>
-                          <input 
-                            type="range" min="0" max="1" step="0.01"
-                            value={patch.fx_phaser_mix} 
-                            onChange={(e) => updatePatchField('fx_phaser_mix', parseFloat(e.target.value))}
-                            className="w-full h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-indigo-500" 
-                          />
-                        </div>
-                      </div>
-                    );
-                  }
+                            {fxKey === 'phaser' && (
+                              <div className="flex flex-col gap-3">
+                                <div className="flex flex-col gap-1.5">
+                                  <div className="flex justify-between text-[7px] uppercase font-bold text-zinc-500">
+                                    <span>Depth</span>
+                                    <span className="text-indigo-400">{Math.round(patch.fx_phaser_depth * 100)}%</span>
+                                  </div>
+                                  <input 
+                                    type="range" min="0" max="1" step="0.01"
+                                    value={patch.fx_phaser_depth}
+                                    onChange={(e) => updatePatchField('fx_phaser_depth', parseFloat(e.target.value))}
+                                    className="w-full h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-indigo-500"
+                                  />
+                                </div>
+                                <div className="flex flex-col gap-1.5">
+                                  <div className="flex justify-between text-[7px] uppercase font-bold text-zinc-500">
+                                    <span>Mix</span>
+                                    <span className="text-indigo-400">{Math.round(patch.fx_phaser_mix * 100)}%</span>
+                                  </div>
+                                  <input 
+                                    type="range" min="0" max="1" step="0.01"
+                                    value={patch.fx_phaser_mix}
+                                    onChange={(e) => updatePatchField('fx_phaser_mix', parseFloat(e.target.value))}
+                                    className="w-full h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-indigo-500"
+                                  />
+                                </div>
+                              </div>
+                            )}
 
-                  if (fxKey === 'eq') {
-                    return (
-                      <div key="eq" id="fx-eq" className="bg-black/35 border border-white/5 rounded-2xl p-3.5 flex flex-col gap-3 hover:border-yellow-500/20 transition-all">
-                        <div className="flex justify-between items-center pb-1.5 border-b border-white/5">
-                          <span className="text-[8.5px] uppercase font-black tracking-wide text-yellow-500 font-sans">📊 STUDIO PARAMETRIC EQ</span>
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              disabled={idx === 0}
-                              onClick={() => moveFx(idx, 'left')}
-                              className="text-[9px] hover:text-yellow-500 disabled:opacity-20 select-none pb-0.5 font-bold cursor-pointer"
-                              title="Move left in signal chain"
-                            >
-                              ◀
-                            </button>
-                            <button
-                              type="button"
-                              disabled={idx === fxOrder.length - 1}
-                              onClick={() => moveFx(idx, 'right')}
-                              className="text-[9px] hover:text-yellow-500 disabled:opacity-20 select-none pb-0.5 font-bold cursor-pointer"
-                              title="Move right in signal chain"
-                            >
-                              ▶
-                            </button>
-                            <span className="h-1.5 w-1.5 rounded-full bg-yellow-500 shadow-[0_0_8px_rgba(234,179,8,0.8)]"></span>
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-3 gap-2 mt-1">
-                          <div className="flex flex-col items-center gap-1">
-                            <span className="text-[6.5px] uppercase font-bold text-slate-500">Low</span>
-                            <input 
-                              type="range" min="0" max="1" step="0.01"
-                              value={patch.fx_eq_low} 
-                              onChange={(e) => updatePatchField('fx_eq_low', parseFloat(e.target.value))}
-                              className="h-10 w-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-yellow-500" 
-                              style={{ writingMode: 'bt-lr', WebkitAppearance: 'slider-vertical' } as any}
-                            />
-                            <span className="text-[7px] font-mono text-yellow-500">{Math.round((patch.fx_eq_low - 0.5) * 24)}dB</span>
-                          </div>
-                          <div className="flex flex-col items-center gap-1">
-                            <span className="text-[6.5px] uppercase font-bold text-slate-500">Mid</span>
-                            <input 
-                              type="range" min="0" max="1" step="0.01"
-                              value={patch.fx_eq_mid} 
-                              onChange={(e) => updatePatchField('fx_eq_mid', parseFloat(e.target.value))}
-                              className="h-10 w-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-yellow-500" 
-                              style={{ writingMode: 'bt-lr', WebkitAppearance: 'slider-vertical' } as any}
-                            />
-                            <span className="text-[7px] font-mono text-yellow-500">{Math.round((patch.fx_eq_mid - 0.5) * 24)}dB</span>
-                          </div>
-                          <div className="flex flex-col items-center gap-1">
-                            <span className="text-[6.5px] uppercase font-bold text-slate-500">High</span>
-                            <input 
-                              type="range" min="0" max="1" step="0.01"
-                              value={patch.fx_eq_high} 
-                              onChange={(e) => updatePatchField('fx_eq_high', parseFloat(e.target.value))}
-                              className="h-10 w-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-yellow-500" 
-                              style={{ writingMode: 'bt-lr', WebkitAppearance: 'slider-vertical' } as any}
-                            />
-                            <span className="text-[7px] font-mono text-yellow-500">{Math.round((patch.fx_eq_high - 0.5) * 24)}dB</span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  }
+                            {fxKey === 'delay' && (
+                              <div className="flex flex-col gap-3">
+                                <div className="flex flex-col gap-1.5">
+                                  <div className="flex justify-between text-[7px] uppercase font-bold text-zinc-500">
+                                    <span>Time</span>
+                                    <span className="text-cyan-400">{Math.round(0.12 + patch.fx_delay_time * 0.88 * 1000)}ms</span>
+                                  </div>
+                                  <input 
+                                    type="range" min="0" max="1" step="0.01"
+                                    value={patch.fx_delay_time}
+                                    onChange={(e) => updatePatchField('fx_delay_time', parseFloat(e.target.value))}
+                                    className="w-full h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-cyan-500"
+                                  />
+                                </div>
+                                <div className="flex flex-col gap-1.5">
+                                  <div className="flex justify-between text-[7px] uppercase font-bold text-zinc-500">
+                                    <span>Mix</span>
+                                    <span className="text-cyan-400">{Math.round(patch.fx_delay_mix * 100)}%</span>
+                                  </div>
+                                  <input 
+                                    type="range" min="0" max="1" step="0.01"
+                                    value={patch.fx_delay_mix}
+                                    onChange={(e) => updatePatchField('fx_delay_mix', parseFloat(e.target.value))}
+                                    className="w-full h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-cyan-500"
+                                  />
+                                </div>
+                              </div>
+                            )}
 
-                  if (fxKey === 'reverb') {
-                    return (
-                      <div key="reverb" id="fx-reverb" className="bg-black/35 border border-white/5 rounded-2xl p-3.5 flex flex-col gap-3 hover:border-violet-500/20 transition-all">
-                        <div className="flex justify-between items-center pb-1.5 border-b border-white/5">
-                          <span className="text-[8.5px] uppercase font-black tracking-wide text-violet-400">🌌 REVERB CATHEDRAL</span>
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              disabled={idx === 0}
-                              onClick={() => moveFx(idx, 'left')}
-                              className="text-[9px] hover:text-violet-400 disabled:opacity-20 select-none pb-0.5 font-bold cursor-pointer"
-                              title="Move left in signal chain"
-                            >
-                              ◀
-                            </button>
-                            <button
-                              type="button"
-                              disabled={idx === fxOrder.length - 1}
-                              onClick={() => moveFx(idx, 'right')}
-                              className="text-[9px] hover:text-violet-400 disabled:opacity-20 select-none pb-0.5 font-bold cursor-pointer"
-                              title="Move right in signal chain"
-                            >
-                              ▶
-                            </button>
-                            <span className={`h-1.5 w-1.5 rounded-full ${patch.fx_reverb_mix > 0 ? 'bg-violet-500 shadow-[0_0_8px_rgba(139,92,246,0.8)]' : 'bg-zinc-700'}`}></span>
-                          </div>
-                        </div>
-                        <div className="flex flex-col gap-2">
-                          <div className="flex justify-between items-center text-[7.5px] font-bold text-slate-400 uppercase">
-                            <span>Room Size</span>
-                            <span className="text-violet-400 font-mono">{Math.round(patch.fx_reverb_size * 100)}%</span>
-                          </div>
-                          <input 
-                            type="range" min="0.1" max="1" step="0.01"
-                            value={patch.fx_reverb_size} 
-                            onChange={(e) => updatePatchField('fx_reverb_size', parseFloat(e.target.value))}
-                            className="w-full h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-violet-500" 
-                          />
+                            {fxKey === 'reverb' && (
+                              <div className="flex flex-col gap-3">
+                                <div className="flex flex-col gap-1.5">
+                                  <div className="flex justify-between text-[7px] uppercase font-bold text-zinc-500">
+                                    <span>Size</span>
+                                    <span className="text-purple-400">{Math.round(patch.fx_reverb_size * 100)}%</span>
+                                  </div>
+                                  <input 
+                                    type="range" min="0" max="1" step="0.01"
+                                    value={patch.fx_reverb_size}
+                                    onChange={(e) => updatePatchField('fx_reverb_size', parseFloat(e.target.value))}
+                                    className="w-full h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-purple-500"
+                                  />
+                                </div>
+                                <div className="flex flex-col gap-1.5">
+                                  <div className="flex justify-between text-[7px] uppercase font-bold text-zinc-500">
+                                    <span>Mix</span>
+                                    <span className="text-purple-400">{Math.round(patch.fx_reverb_mix * 100)}%</span>
+                                  </div>
+                                  <input 
+                                    type="range" min="0" max="1" step="0.01"
+                                    value={patch.fx_reverb_mix}
+                                    onChange={(e) => updatePatchField('fx_reverb_mix', parseFloat(e.target.value))}
+                                    className="w-full h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-purple-500"
+                                  />
+                                </div>
+                              </div>
+                            )}
 
-                          <div className="flex justify-between items-center text-[7.5px] font-bold text-slate-400 uppercase">
-                            <span>Space Wet Mix</span>
-                            <span className="text-violet-400 font-mono">{Math.round(patch.fx_reverb_mix * 100)}%</span>
-                          </div>
-                          <input 
-                            type="range" min="0" max="1" step="0.01"
-                            value={patch.fx_reverb_mix} 
-                            onChange={(e) => updatePatchField('fx_reverb_mix', parseFloat(e.target.value))}
-                            className="w-full h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-violet-500" 
-                          />
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  if (fxKey === 'delay') {
-                    return (
-                      <div key="delay" id="fx-delay" className="bg-black/35 border border-white/5 rounded-2xl p-3.5 flex flex-col gap-3 hover:border-cyan-500/20 transition-all">
-                        <div className="flex justify-between items-center pb-1.5 border-b border-white/5">
-                          <span className="text-[8.5px] uppercase font-black tracking-wide text-cyan-400">⏱️ PING-PONG DELAY ECHO</span>
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              disabled={idx === 0}
-                              onClick={() => moveFx(idx, 'left')}
-                              className="text-[9px] hover:text-cyan-400 disabled:opacity-20 select-none pb-0.5 font-bold cursor-pointer"
-                              title="Move left in signal chain"
-                            >
-                              ◀
-                            </button>
-                            <button
-                              type="button"
-                              disabled={idx === fxOrder.length - 1}
-                              onClick={() => moveFx(idx, 'right')}
-                              className="text-[9px] hover:text-cyan-400 disabled:opacity-20 select-none pb-0.5 font-bold cursor-pointer"
-                              title="Move right in signal chain"
-                            >
-                              ▶
-                            </button>
-                            <span className={`h-1.5 w-1.5 rounded-full ${patch.fx_delay_mix > 0 ? 'bg-cyan-500 shadow-[0_0_8px_rgba(6,182,212,0.8)]' : 'bg-zinc-700'}`}></span>
-                          </div>
-                        </div>
-                        <div className="flex flex-col gap-2">
-                          <div className="flex justify-between items-center text-[7.5px] font-bold text-slate-400 uppercase">
-                            <span>Feedback Echo</span>
-                            <span className="text-cyan-400 font-mono">{Math.round(patch.fx_delay_feedback * 100)}%</span>
-                          </div>
-                          <input 
-                            type="range" min="0" max="0.95" step="0.01"
-                            value={patch.fx_delay_feedback} 
-                            onChange={(e) => updatePatchField('fx_delay_feedback', parseFloat(e.target.value))}
-                            className="w-full h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-cyan-500" 
-                          />
-
-                          <div className="flex justify-between items-center text-[7.5px] font-bold text-slate-400 uppercase">
-                            <span>Delay Wet Mix</span>
-                            <span className="text-cyan-400 font-mono">{Math.round(patch.fx_delay_mix * 100)}%</span>
-                          </div>
-                          <input 
-                            type="range" min="0" max="1" step="0.01"
-                            value={patch.fx_delay_mix} 
-                            onChange={(e) => updatePatchField('fx_delay_mix', parseFloat(e.target.value))}
-                            className="w-full h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-cyan-500" 
-                          />
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  if (fxKey === 'compressor') {
-                    return (
-                      <div key="compressor" id="fx-compressor" className="bg-black/35 border border-white/5 rounded-2xl p-3.5 flex flex-col gap-3 hover:border-pink-500/20 transition-all">
-                        <div className="flex justify-between items-center pb-1.5 border-b border-white/5">
-                          <span className="text-[8.5px] uppercase font-black tracking-wide text-pink-400 font-sans">📉 DYNAMICS COMPRESSOR</span>
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              disabled={idx === 0}
-                              onClick={() => moveFx(idx, 'left')}
-                              className="text-[9px] hover:text-pink-400 disabled:opacity-20 select-none pb-0.5 font-bold cursor-pointer"
-                              title="Move left in signal chain"
-                            >
-                              ◀
-                            </button>
-                            <button
-                              type="button"
-                              disabled={idx === fxOrder.length - 1}
-                              onClick={() => moveFx(idx, 'right')}
-                              className="text-[9px] hover:text-pink-400 disabled:opacity-20 select-none pb-0.5 font-bold cursor-pointer"
-                              title="Move right in signal chain"
-                            >
-                              ▶
-                            </button>
-                            <span className={`h-1.5 w-1.5 rounded-full ${patch.fx_compressor_mix > 0 ? 'bg-pink-500 shadow-[0_0_8px_rgba(236,72,153,0.8)]' : 'bg-zinc-700'}`}></span>
-                          </div>
-                        </div>
-                        <div className="flex flex-col gap-2">
-                          <div className="flex justify-between items-center text-[7.5px] font-bold text-slate-400 uppercase">
-                            <span>Threshold Level</span>
-                            <span className="text-pink-400 font-mono">-{Math.round(patch.fx_compressor_threshold * 35)} dB</span>
-                          </div>
-                          <input 
-                            type="range" min="0" max="1" step="0.01"
-                            value={patch.fx_compressor_threshold} 
-                            onChange={(e) => updatePatchField('fx_compressor_threshold', parseFloat(e.target.value))}
-                            className="w-full h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-pink-500" 
-                          />
-
-                          <div className="flex justify-between items-center text-[7.5px] font-bold text-slate-400 uppercase">
-                            <span>Lim Mix Output</span>
-                            <span className="text-pink-400 font-mono">{Math.round(patch.fx_compressor_mix * 100)}%</span>
-                          </div>
-                          <input 
-                            type="range" min="0" max="1" step="0.01"
-                            value={patch.fx_compressor_mix} 
-                            onChange={(e) => updatePatchField('fx_compressor_mix', parseFloat(e.target.value))}
-                            className="w-full h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-pink-500" 
-                          />
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  return null;
+                            {fxKey === 'eq' && (
+                              <div className="flex flex-col gap-3">
+                                <EqGraph 
+                                  low={patch.fx_eq_low}
+                                  mid={patch.fx_eq_mid}
+                                  high={patch.fx_eq_high}
+                                  onChange={(l, m, h) => {
+                                    updatePatchField('fx_eq_low', l);
+                                    updatePatchField('fx_eq_mid', m);
+                                    updatePatchField('fx_eq_high', h);
+                                  }}
+                                />
+                                <div className="grid grid-cols-3 gap-2">
+                                  <div className="flex flex-col gap-1 items-center">
+                                    <span className="text-[6px] uppercase font-bold text-zinc-500">Low</span>
+                                    <span className="text-[7.5px] font-mono text-yellow-500">{Math.round((patch.fx_eq_low - 0.5) * 24)}dB</span>
+                                  </div>
+                                  <div className="flex flex-col gap-1 items-center">
+                                    <span className="text-[6px] uppercase font-bold text-zinc-500">Mid</span>
+                                    <span className="text-[7.5px] font-mono text-yellow-500">{Math.round((patch.fx_eq_mid - 0.5) * 24)}dB</span>
+                                  </div>
+                                  <div className="flex flex-col gap-1 items-center">
+                                    <span className="text-[6px] uppercase font-bold text-zinc-500">High</span>
+                                    <span className="text-[7.5px] font-mono text-yellow-500">{Math.round((patch.fx_eq_high - 0.5) * 24)}dB</span>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </motion.div>
+                  );
                 })}
 
                 {/* 8. MASTER LIMITER CEILING */}
-                <div id="fx-limiter" className="bg-black/35 border border-white/5 rounded-2xl p-3.5 flex flex-col justify-center gap-1 hover:border-emerald-500/20 transition-all bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-teal-950/10 to-transparent">
-                  <div className="flex items-center gap-2 mb-2 pb-1 text-[8.5px] uppercase font-black text-emerald-400 border-b border-white/5">
-                    <CheckCircle size={10} className="text-emerald-500" />
+                <div id="fx-limiter" className="bg-gradient-to-br from-emerald-950/20 to-black/40 border border-emerald-500/20 rounded-2xl p-4 flex flex-col justify-center gap-2 hover:border-emerald-500/40 transition-all group col-span-1 min-h-[50px]">
+                  <div className="flex items-center gap-2 text-[8.5px] uppercase font-black text-emerald-400">
+                    <CheckCircle size={11} className="text-emerald-500" />
                     <span>AUDIO PROTECTION SAFE</span>
                   </div>
-                  <p className="text-[7.5px] uppercase font-mono leading-relaxed text-slate-500">
-                    Active brickwall ear limiter engaged at <span className="text-emerald-400 font-semibold">-1.0 dBFS</span> to clip hot transients and prevent hardware audio clipping across high unison detune.
+                  <p className="text-[7px] uppercase font-mono leading-relaxed text-zinc-500 group-hover:text-emerald-400/60 transition-colors">
+                    Active brickwall ear limiter engaged at <span className="text-emerald-400 font-semibold">-1.0 dBFS</span> peak ceiling.
                   </p>
                 </div>
-
               </div>
             </div>
 

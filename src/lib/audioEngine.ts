@@ -130,7 +130,8 @@ export class DubstepEngine {
   public unisonWidth = 0.6; // Stereo width spread (0 to 1) for Vital wide unison
   public currentKey = 'C'; // Selected musical root key
   public currentScaleType = 'minor'; // Selected musical scale type (minor, major, phrygian, dorian, lharmonic)
-  public customWaveform: number[] | null = null; // Custom sketched waveform from laboratory
+  public customWaveform: number[] | null = null; 
+  public fxOrder: string[] = ['distortion', 'chorus', 'phaser', 'eq', 'reverb', 'delay', 'compressor'];
 
   // Routing custom multi-voice 3-osc patches directly into loop triggers
   public usePatchInLoop = false;
@@ -788,22 +789,133 @@ export class DubstepEngine {
 
     const distFactor = this.bitcrushRatio * 2.5;
     const distAmount = p.dist * 100 * distFactor;
-    if (distAmount > 10) {
-      const w = this.audioCtx.createWaveShaper();
-      const n = 44100;
-      const c = new Float32Array(n);
-      for (let i = 0; i < n; i++) {
-        const x = i * 2 / n - 1;
-        c[i] = ((3 + distAmount) * x * 20 * (Math.PI / 180)) / (Math.PI + distAmount * Math.abs(x));
-      }
-      w.curve = c;
-      w.oversample = '4x';
-      filterNode.connect(w).connect(mainGainNode);
-    } else {
-      filterNode.connect(mainGainNode);
-    }
+    
+    // Connect to intermediate mainGainNode first
+    filterNode.connect(mainGainNode);
 
-    mainGainNode.connect(this.masterGain);
+    // Dynamic user-defined FX chain processing
+    let lastNode: AudioNode = mainGainNode;
+
+    this.fxOrder.forEach((fxKey) => {
+      if (fxKey === 'distortion' && this.labPatch.fx_distortion_mix > 0) {
+        try {
+          const shaper = this.audioCtx!.createWaveShaper();
+          const drive = this.labPatch.fx_distortion_drive;
+          const mix = this.labPatch.fx_distortion_mix;
+          const k = drive * 100 + distAmount + 1;
+          const n = 44100;
+          const c = new Float32Array(n);
+          for (let i = 0; i < n; i++) {
+            const x = i * 2 / n - 1;
+            c[i] = ((3 + k) * x * 20 * (Math.PI / 180)) / (Math.PI + k * Math.abs(x));
+          }
+          shaper.curve = c;
+          shaper.oversample = '4x';
+
+          const dryGain = this.audioCtx!.createGain();
+          const wetGain = this.audioCtx!.createGain();
+          dryGain.gain.setValueAtTime(1 - mix, now);
+          wetGain.gain.setValueAtTime(mix, now);
+
+          const splitter = this.audioCtx!.createGain();
+          const merger = this.audioCtx!.createGain();
+
+          lastNode.connect(splitter);
+          splitter.connect(dryGain).connect(merger);
+          splitter.connect(shaper).connect(wetGain).connect(merger);
+          lastNode = merger;
+        } catch (e) {}
+      }
+
+      if (fxKey === 'eq') {
+        try {
+          const low = this.audioCtx!.createBiquadFilter();
+          low.type = 'lowshelf'; low.frequency.value = 220; low.gain.value = (this.labPatch.fx_eq_low - 0.5) * 24;
+          const mid = this.audioCtx!.createBiquadFilter();
+          mid.type = 'peaking'; mid.frequency.value = 1000; mid.gain.value = (this.labPatch.fx_eq_mid - 0.5) * 24;
+          const high = this.audioCtx!.createBiquadFilter();
+          high.type = 'highshelf'; high.frequency.value = 4500; high.gain.value = (this.labPatch.fx_eq_high - 0.5) * 24;
+          lastNode.connect(low).connect(mid).connect(high);
+          lastNode = high;
+        } catch (e) {}
+      }
+
+      if (fxKey === 'chorus' && this.labPatch.fx_chorus_mix > 0) {
+        try {
+          const mix = this.labPatch.fx_chorus_mix;
+          const splitter = this.audioCtx!.createGain();
+          const merger = this.audioCtx!.createGain();
+          const dry = this.audioCtx!.createGain();
+          const wet = this.audioCtx!.createGain();
+          dry.gain.value = 1 - mix; wet.gain.value = mix;
+          lastNode.connect(splitter);
+          splitter.connect(dry).connect(merger);
+          const dL = this.audioCtx!.createDelay(); dL.delayTime.value = 0.02;
+          const dR = this.audioCtx!.createDelay(); dR.delayTime.value = 0.03;
+          splitter.connect(dL).connect(wet).connect(merger);
+          splitter.connect(dR).connect(wet).connect(merger);
+          lastNode = merger;
+        } catch (e) {}
+      }
+
+      if (fxKey === 'phaser' && this.labPatch.fx_phaser_mix > 0) {
+        try {
+          const phaser = this.audioCtx!.createBiquadFilter();
+          phaser.type = 'allpass'; phaser.frequency.value = 1000 + (this.labPatch.fx_phaser_rate * 2000);
+          const mix = this.labPatch.fx_phaser_mix;
+          const dry = this.audioCtx!.createGain(); dry.gain.value = 1 - mix;
+          const wet = this.audioCtx!.createGain(); wet.gain.value = mix;
+          const m = this.audioCtx!.createGain();
+          lastNode.connect(dry).connect(m);
+          lastNode.connect(phaser).connect(wet).connect(m);
+          lastNode = m;
+        } catch (e) {}
+      }
+
+      if (fxKey === 'delay' && this.labPatch.fx_delay_mix > 0) {
+        try {
+          const delay = this.audioCtx!.createDelay(); delay.delayTime.value = 0.3 * this.labPatch.fx_delay_time + 0.1;
+          const feedback = this.audioCtx!.createGain(); feedback.gain.value = this.labPatch.fx_delay_feedback * 0.6;
+          const mix = this.labPatch.fx_delay_mix;
+          const dry = this.audioCtx!.createGain(); dry.gain.value = 1 - mix;
+          const wet = this.audioCtx!.createGain(); wet.gain.value = mix;
+          const m = this.audioCtx!.createGain();
+          lastNode.connect(dry).connect(m);
+          lastNode.connect(delay).connect(wet).connect(m);
+          delay.connect(feedback).connect(delay);
+          lastNode = m;
+        } catch (e) {}
+      }
+
+      if (fxKey === 'reverb' && this.labPatch.fx_reverb_mix > 0) {
+        try {
+          const rev = this.audioCtx!.createConvolver(); // Simplified for engine Loop
+          // Just use a simple delay feedback for reverb approximation in the fast engine
+          const d1 = this.audioCtx!.createDelay(); d1.delayTime.value = 0.05 * this.labPatch.fx_reverb_size + 0.01;
+          const f1 = this.audioCtx!.createGain(); f1.gain.value = 0.4 * this.labPatch.fx_reverb_decay;
+          const mix = this.labPatch.fx_reverb_mix;
+          const m = this.audioCtx!.createGain();
+          lastNode.connect(m);
+          lastNode.connect(d1).connect(f1).connect(d1);
+          d1.connect(this.audioCtx!.createGain()).connect(m);
+          m.gain.value = 1.0; 
+          // (Wait, this is very simplified, but better than nothing for the background engine)
+          lastNode = m;
+        } catch (e) {}
+      }
+
+      if (fxKey === 'compressor' && this.labPatch.fx_compressor_mix > 0) {
+        try {
+          const comp = this.audioCtx!.createDynamicsCompressor();
+          comp.threshold.value = -30 * this.labPatch.fx_compressor_threshold;
+          comp.ratio.value = 1 + this.labPatch.fx_compressor_ratio * 12;
+          lastNode.connect(comp);
+          lastNode = comp;
+        } catch (e) {}
+      }
+    });
+
+    lastNode.connect(this.masterGain!);
 
     mainGainNode.gain.setValueAtTime(0, now);
     mainGainNode.gain.linearRampToValueAtTime(0.7, now + 0.05);
