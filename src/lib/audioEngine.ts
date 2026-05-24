@@ -148,7 +148,28 @@ export class DubstepEngine {
     filter_cutoff: 0.45,
     filter_resonance: 0.35,
     lfo_1_rate: 3.5,
-    lfo_1_amount: 0.65
+    lfo_1_amount: 0.65,
+
+    // Studio effects defaults
+    fx_distortion_drive: 0.15,
+    fx_distortion_mix: 0.10,
+    fx_delay_time: 0.35,
+    fx_delay_feedback: 0.40,
+    fx_delay_mix: 0.15,
+    fx_reverb_size: 0.45,
+    fx_reverb_decay: 0.50,
+    fx_reverb_mix: 0.20,
+    fx_chorus_rate: 0.35,
+    fx_chorus_mix: 0.10,
+    fx_eq_low: 0.50,
+    fx_eq_mid: 0.52,
+    fx_eq_high: 0.50,
+    fx_phaser_rate: 0.25,
+    fx_phaser_depth: 0.40,
+    fx_phaser_mix: 0.05,
+    fx_compressor_threshold: 0.20,
+    fx_compressor_ratio: 0.30,
+    fx_compressor_mix: 0.10
   };
 
   public osc1Waveform: number[] = [];

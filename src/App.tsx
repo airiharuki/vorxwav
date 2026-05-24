@@ -1420,6 +1420,15 @@ export default function App() {
                   Dial in ultra-wide vital style detunes that expand multi-voice digital oscillators into warm soundscapes.
                 </p>
               </div>
+
+              <div className="flex flex-col gap-1.5 bg-emerald-950/15 p-3 rounded-xl border border-emerald-500/15">
+                <span className="font-extrabold uppercase text-emerald-400 tracking-wider flex items-center gap-1 font-mono">
+                  🎛️ PREMIUM FX CHAIN
+                </span>
+                <p className="text-zinc-400 text-[8.5px] uppercase font-mono leading-normal">
+                  Chained Distortion Overdrive, 3-Band Parametric EQ, Stereo Chorus, Sweeping Phaser, Ping-Pong Delay, Schroeder Reverb, and OTT Dynamics Compressor.
+                </p>
+              </div>
             </div>
 
             <div className="mt-auto border-t border-white/5 pt-3.5 text-center flex flex-col gap-1">
