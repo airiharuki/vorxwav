@@ -29,7 +29,7 @@ function transposeChordName(name: string, semitones: number): string {
 
 export default function App() {
   const [isReady, setIsReady] = useState(false);
-  const [showWhatsNew, setShowWhatsNew] = useState(true);
+  const [showWhatsNew, setShowWhatsNew] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentBar, setCurrentBar] = useState(0);
   const [hasSequence, setHasSequence] = useState(false);
@@ -470,7 +470,8 @@ export default function App() {
 
       <main className="flex-1 flex flex-col lg:flex-row gap-6 p-4 sm:p-6 min-h-0 overflow-y-auto lg:overflow-hidden">
         {/* Sidebar Controls */}
-        <aside className="w-full lg:w-64 flex flex-col md:grid md:grid-cols-2 lg:flex lg:flex-col gap-4 flex-shrink-0 lg:overflow-y-auto pr-1 select-none">
+        <aside className={`${workspace === 'synthlab' ? 'lg:hidden!' : ''} w-full lg:w-64 min-[1400px]:w-[34rem] flex flex-col md:grid md:grid-cols-2 lg:flex lg:flex-col min-[1400px]:flex-row min-[1400px]:items-start gap-4 flex-shrink-0 lg:overflow-y-auto pr-1 select-none`}>
+          <div className="contents min-[1400px]:flex min-[1400px]:flex-1 min-[1400px]:min-w-0 min-[1400px]:flex-col min-[1400px]:gap-4">
           <div className="glass-panel rounded-2xl p-5 flex flex-col gap-4">
             <button 
               onClick={handleInit}
@@ -678,6 +679,8 @@ export default function App() {
             </button>
           </div>
 
+          </div>
+          <div className="contents min-[1400px]:flex min-[1400px]:flex-1 min-[1400px]:min-w-0 min-[1400px]:flex-col min-[1400px]:gap-4">
           {/* Ambient Chord Engine Panel */}
           <div className="glass-panel rounded-2xl p-5 flex flex-col gap-4">
             <div className="flex justify-between items-center border-b border-white/5 pb-2">
@@ -1244,10 +1247,11 @@ export default function App() {
               <p className="text-xs font-mono text-cyan-200 mt-1">{status}</p>
             </div>
           </div>
+          </div>
         </aside>
 
         {/* Central Engine Workspace */}
-        <section className="flex-1 flex flex-col gap-6 min-h-0 overflow-y-auto lg:overflow-hidden">
+        <section className="flex-1 min-w-0 flex flex-col gap-6 min-h-0 overflow-y-auto pr-1">
           {/* Workspace Toggles - Loop Orchestrator vs Patch Lab */}
           <div className="flex items-center justify-between p-1 bg-black/45 rounded-2xl border border-white/[0.04] shrink-0">
             <button
@@ -1275,7 +1279,7 @@ export default function App() {
           {workspace === 'orchestrator' ? (
             <>
               {/* Oscilloscope / Visualizer */}
-              <Visualizer analyser={audioEngine.analyser} />
+              <Visualizer analyser={audioEngine.analyser} className="lg:min-h-[240px]" />
 
               {/* Sequencer Section */}
               <div className="glass-panel rounded-3xl p-6 flex flex-col gap-6 sm:gap-4 flex-shrink-0">
@@ -1371,7 +1375,13 @@ export default function App() {
 
         {/* Right Sidebar: What's New in v1.2 */}
         {showWhatsNew && (
-          <aside className="w-full lg:w-72 bg-gradient-to-b from-black/55 to-black/35 border border-cyan-500/10 rounded-2xl p-5 flex flex-col gap-4.5 flex-shrink-0 lg:overflow-y-auto select-none shadow-[2px_10px_35px_rgba(0,0,0,0.7)]">
+          <div
+            className="hidden lg:block fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
+            onClick={() => setShowWhatsNew(false)}
+          />
+        )}
+        {showWhatsNew && (
+          <aside className="w-full lg:w-80 lg:fixed lg:right-6 lg:top-24 lg:bottom-20 lg:z-50 lg:bg-[#05070a]/95 bg-gradient-to-b from-black/55 to-black/35 border border-cyan-500/10 rounded-2xl p-5 flex flex-col gap-4.5 flex-shrink-0 lg:overflow-y-auto select-none shadow-[2px_10px_35px_rgba(0,0,0,0.7)]">
             <div className="flex justify-between items-center border-b border-white/5 pb-2.5">
               <h3 className="text-[10px] font-black uppercase tracking-widest text-cyan-300 flex items-center gap-1.5 font-mono">
                 <span>🚀 WHAT'S NEW // V1.2</span>
